@@ -1,4 +1,4 @@
-name: Build Nginx 1.29.5 for Android arm64-v8a (NDK r29)
+name: Build Nginx for Android arm64-v8a (NDK r29 Final Fix)
 
 on:
   workflow_dispatch:
@@ -16,12 +16,12 @@ jobs:
           echo "GCC Version: $(gcc --version | head -n1)"
           echo "Clang Version: $(clang --version | head -n1)"
 
-      - name: 🌱 克隆基础仓库
+      - name: 🌱 克隆仓库
         run: |
           git clone https://github.com/ryanlee486/nginx-android.git
           cd nginx-android
           find . -name "*.sh" -type f -exec chmod +x {} \;
-          echo "✅ 基础仓库克隆及权限修复完成"
+          echo "✅ 仓库克隆及权限修复完成"
 
       - name: 📦 安装依赖
         run: |
@@ -38,24 +38,10 @@ jobs:
           echo "✅ NDK r29 配置完成"
           echo "NDK 版本: $($ANDROID_NDK_ROOT/ndk-build --version | head -n1)"
 
-      - name: 📥 替换为 Nginx 1.29.5
-        run: |
-          # 进入基础仓库的 Nginx 源码目录（根据实际目录结构调整）
-          cd nginx-android/nginx  # 假设原仓库将 Nginx 源码放在 nginx 目录下
-          # 删除旧版本源码
-          rm -rf *
-          # 下载并解压 1.29.5 版本
-          wget -q https://github.com/nginx/nginx/releases/download/release-1.29.5/nginx-1.29.5.zip -O nginx.zip
-          unzip -q nginx.zip
-          # 将解压后的文件移动到当前目录（去除外层文件夹）
-          mv nginx-1.29.5/* .
-          rm -rf nginx-1.29.5 nginx.zip
-          echo "✅ 已替换为 Nginx 1.29.5"
-
-      - name: 🛠️ 处理补丁（跳过问题补丁）
+      - name: 🛠️ 强制跳过有问题的补丁（关键修复）
         run: |
           cd nginx-android
-          # 删除有问题的补丁
+          # 直接删除问题补丁，避免构建脚本尝试应用
           PATCH_FILE="patches/01-cross-compilation-sizeof.patch"
           if [ -f "$PATCH_FILE" ]; then
             rm -f "$PATCH_FILE"
@@ -64,31 +50,29 @@ jobs:
             echo "ℹ️ 未找到问题补丁 $PATCH_FILE，无需处理"
           fi
 
-      - name: 🛠️ 修复构建脚本兼容性
+      - name: 🛠️ 修改构建脚本（兼容补丁缺失）
         run: |
           cd nginx-android
           if [ -f "scripts/build-android.sh" ]; then
-            # 适配 Nginx 1.29.5 的路径和补丁逻辑
+            # 确保构建脚本在补丁不存在时不报错
             sed -i 's/apply_patch $patch/[ -f "$patch" ] && apply_patch $patch/' scripts/build-android.sh
-            # 若构建脚本中硬编码了旧版本号，替换为 1.29.5
-            sed -i 's/nginx-[0-9.]*\.zip/nginx-1.29.5.zip/' scripts/build-android.sh
-            echo "✅ 构建脚本已适配 Nginx 1.29.5"
+            echo "✅ 构建脚本兼容性修复完成"
           else
             echo "❌ 未找到构建脚本，构建无法继续"
             exit 1
           fi
 
-      - name: 🔨 构建 Nginx 1.29.5 for arm64-v8a
+      - name: 🔨 构建 Nginx for arm64-v8a
         run: |
           cd nginx-android
           export ANDROID_ABI=arm64-v8a
           export ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT
           ./scripts/build-android.sh
-          echo "✅ Nginx 1.29.5 构建完成"
+          echo "✅ 构建完成"
 
       - name: 📤 上传构建产物
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: nginx-1.29.5-android-arm64-v8a
+          name: nginx-android-arm64-v8a
           path: nginx-android/build/install/arm64-v8a/
