@@ -1,4 +1,4 @@
-name: Build Nginx for Android arm64-v8a (NDK r29 - 完整修复版)
+name: Build Nginx for Android arm64-v8a (NDK r29 - sizeof 最终根治版)
 
 on:
   workflow_dispatch:
@@ -30,102 +30,60 @@ jobs:
           echo "ANDROID_NDK_ROOT=/opt/android-ndk-r29" >> $GITHUB_ENV
           echo "✅ NDK 配置完成"
 
-      - name: 🛠️ 根治损坏补丁（01 + 08）并规范化
+      - name: 🛠️ 清理坏补丁（01 + 08）并规范化
         run: |
           cd nginx-android
           PATCH_DIR="src/nginx_patches"
           
-          # 1. 删除已知坏补丁（sizeof 旧版 + cpu-affinity）
+          # 删除已知坏补丁
           for bad_patch in "01-cross-compilation-sizeof.patch" "08-android-cpu-affinity.patch"; do
             if [ -f "$PATCH_DIR/$bad_patch" ]; then
               rm -f "$PATCH_DIR/$bad_patch"
               echo "✅ 已删除损坏补丁: $bad_patch"
-            else
-              echo "⚠️  $bad_patch 不存在（已处理）"
             fi
           done
           
-          # 2. 重命名残留（防御）
+          # 重命名残留 + 规范化所有剩余 patch（强制 LF）
           find "$PATCH_DIR" -iname "*sizeof*" -o -iname "*cpu-affinity*" -type f -exec mv {} {}.bak 2>/dev/null \; || true
-          echo "✅ [步骤2] 已清理残留补丁"
-          
-          # 3. 规范化所有剩余 patch（防止 malformed）
-          echo "🔧 正在修复所有 patch 文件行结束符..."
           find "$PATCH_DIR" -name "*.patch" -type f -exec sh -c '
             tr -d "\r" < "$1" > "$1.tmp" && mv "$1.tmp" "$1"
             [ -n "$(tail -c1 "$1")" ] && echo >> "$1"
           ' _ {} \;
-          echo "✅ [步骤3] 所有 patch 已规范化"
+          echo "✅ 坏补丁清理 + 所有 patch 规范化完成"
 
-      - name: 🩹 关键修复：交叉编译 sizeof 测试桩（解决 "can not detect int size" + Exec format error）
+      - name: 🩹 根治 sizeof（强制注入硬编码 stub - 最可靠方案）
         run: |
           cd nginx-android
           
-          # 构建脚本会在运行时提取 nginx 源码到 nginx/ 目录，我们提前准备一个正确的 sizeof 脚本（arm64-v8a LP64 模型）
-          # 这个 stub 会直接返回正确的大小值，避免在 x86_64 host 上运行 aarch64 二进制
-          echo "🔧 注入 cross-compile sizeof 修复脚本..."
-          cat > src/nginx_patches/01-cross-compilation-sizeof.patch << 'EOF'
-          diff --git a/auto/types/sizeof b/auto/types/sizeof
-          index 1234567..89abcde 100755
-          --- a/auto/types/sizeof
-          +++ b/auto/types/sizeof
-          @@ -1,50 +1,28 @@
-           #!/bin/sh
+          echo "🔧 正在修改 build-android.sh：在 rollback 后强制覆盖 sizeof 文件..."
           
-          -ngx_type=$1
-          +ngx_type="$1"
+          # 使用 sed 在 "Rolling back nginx source to clean state..." 之后立即插入 stub 创建代码
+          # 这确保无论 rollback 多少次，configure 运行前 sizeof 都是正确的 arm64-v8a 版本
+          sed -i '/Rolling back nginx source to clean state.../a \
+            echo "🛠️ 强制注入 arm64-v8a sizeof 硬编码 stub（绕过 Exec format error）"; \
+            mkdir -p nginx/auto/types; \
+            cat > nginx/auto/types/sizeof << '"'"'STUB_EOF'"'"' \
+            #!/bin/sh \
+            ngx_type="$1" \
+            case "$ngx_type" in \
+              int|unsigned\ int)                 echo " 4 bytes" ;; \
+              long|unsigned\ long|size_t|off_t|time_t|"void *") echo " 8 bytes" ;; \
+              "long long"|"unsigned long long")  echo " 8 bytes" ;; \
+              *)                                 echo " 8 bytes" ;; \
+            esac \
+            echo "✅ sizeof 已硬编码为 arm64-v8a LP64 模型" \
+            STUB_EOF \
+                        chmod +x nginx/auto/types/sizeof' scripts/build-android.sh
           
-          -ngx_test="$CC $CC_TEST_FLAGS $CC_AUX_FLAGS \
-          -          -o $NGX_AUTOTEST $NGX_AUTOTEST.c $NGX_LD_OPT $ngx_feature_libs"
-          -
-          -eval "$ngx_test >> $NGX_AUTOCONF_ERR 2>&1"
-          -
-          -if [ -x $NGX_AUTOTEST ]; then
-          -    ngx_size=`$NGX_AUTOTEST`
-          -    echo " $ngx_size bytes"
-          -fi
-          -
-          -case $ngx_size in
-          +case "$ngx_type" in
-          +  int|unsigned\ int)                 ngx_size=4 ;;
-          +  long|unsigned\ long)               ngx_size=8 ;;
-          +  "long long"|"unsigned long long")  ngx_size=8 ;;
-          +  size_t|off_t|time_t|"void *")      ngx_size=8 ;;
-          +  *)                                 ngx_size=8 ;;
-          +esac
-          +
-          +echo " $ngx_size bytes"
-          +
-          +case $ngx_size in
-               4)
-                   ngx_max_value=2147483647
-                   ngx_max_len='(sizeof("-2147483648") - 1)'
-               ;;
-          
-               8)
-                   ngx_max_value=9223372036854775807LL
-                   ngx_max_len='(sizeof("-9223372036854775808") - 1)'
-               ;;
-          
-               *)
-                   echo
-                   echo "$0: error: can not detect $ngx_type size"
-                   exit 1
-               ;;
-           esac
-          
-          -rm -rf $NGX_AUTOTEST*
-          +echo "✅ sizeof 硬编码修复已应用（arm64-v8a）"
-          EOF
-          echo "✅ 已动态生成正确的 01-cross-compilation-sizeof.patch（专为 NDK r29 设计）"
+          echo "✅ sizeof 硬编码 stub 已成功注入到构建脚本中（双保险）"
 
       - name: 🧪 验证修复效果
         run: |
           cd nginx-android
-          echo "=== 修复后补丁目录（01 应已重新生成）==="
-          ls -1 src/nginx_patches/ 2>/dev/null | grep -E '01|08' || echo "✅ 01 已重新生成，08 已移除"
-          echo -e "\n=== sizeof 补丁预览 ==="
-          head -n 30 src/nginx_patches/01-cross-compilation-sizeof.patch | tail -n 15
+          echo "=== 剩余补丁（不应有 01/08）==="
+          ls -1 src/nginx_patches/ 2>/dev/null | grep -E '01|08' || echo "✅ 01 和 08 已彻底移除"
+          echo -e "\n=== build-android.sh 是否已注入 stub？==="
+          grep -q "强制注入 arm64-v8a sizeof" scripts/build-android.sh && echo "✅ stub 已注入" || echo "⚠️ 注入失败（请检查）"
 
       - name: 🔨 构建（开启详细日志）
         run: |
@@ -149,5 +107,5 @@ jobs:
       - name: 📋 构建摘要（失败时显示关键错误）
         if: failure()
         run: |
-          echo "❌ 构建失败！最后30行关键错误："
-          tail -n 30 nginx-android/build.log | grep -A 15 -E "error|failed|Hunk|malformed|sizeof|detect|Exec" || tail -n 25 nginx-android/build.log
+          echo "❌ 构建失败！最后40行关键信息："
+          tail -n 40 nginx-android/build.log | grep -A 20 -E "error|failed|Hunk|sizeof|detect|Exec|bytes" || tail -n 30 nginx-android/build.log
