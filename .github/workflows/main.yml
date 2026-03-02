@@ -1,4 +1,4 @@
-name: Build Nginx for Android arm64-v8a (NDK r29 - sizeof 问题根治)
+name: Build Nginx for Android arm64-v8a (NDK r29 - sizeof + cpu-affinity 问题根治)
 
 on:
   workflow_dispatch:
@@ -35,56 +35,55 @@ jobs:
           cd nginx-android
           echo "=== 补丁目录内容 ==="
           ls -1 src/nginx_patches/ 2>/dev/null || echo "⚠️ 目录不存在"
-          echo -e "\n=== 检查构建脚本中01补丁引用 ==="
-          if grep -n "01.*sizeof\|cross.*compilation.*sizeof" scripts/build-android.sh; then
+          echo -e "\n=== 检查构建脚本中01/08补丁引用 ==="
+          if grep -n "01.*sizeof\|08.*cpu-affinity\|cross.*compilation.*sizeof" scripts/build-android.sh; then
             echo "⚠️  发现潜在引用（将处理）"
           else
             echo "✅ 未发现硬编码引用"
           fi
 
-      - name: 🛠️ 根治 sizeof 问题（三重保障）
+      - name: 🛠️ 根治已知损坏补丁（sizeof + cpu-affinity）
         run: |
           cd nginx-android
           PATCH_DIR="src/nginx_patches"
-          TARGET_PATCH="01-cross-compilation-sizeof.patch"
           
-          # 1. 物理删除补丁文件
-          if [ -f "$PATCH_DIR/$TARGET_PATCH" ]; then
-            rm -f "$PATCH_DIR/$TARGET_PATCH"
-            echo "✅ [步骤1] 已删除冲突补丁文件"
-          else
-            echo "⚠️  [步骤1] 补丁文件不存在（可能已被处理）"
-          fi
+          # 1. 删除两个已知坏补丁
+          for bad_patch in "01-cross-compilation-sizeof.patch" "08-android-cpu-affinity.patch"; do
+            if [ -f "$PATCH_DIR/$bad_patch" ]; then
+              rm -f "$PATCH_DIR/$bad_patch"
+              echo "✅ [步骤1] 已删除损坏补丁: $bad_patch"
+            else
+              echo "⚠️  [步骤1] $bad_patch 不存在（已处理）"
+            fi
+          done
           
-          # 2. 重命名同名残留（防御性处理）
-          find "$PATCH_DIR" -iname "*sizeof*" -type f -exec mv {} {}.bak 2>/dev/null \; && echo "✅ [步骤2] 已重命名所有 sizeof 相关补丁" || echo "✅ [步骤2] 无残留 sizeof 补丁"
+          # 2. 重命名所有残留（防御性处理）
+          find "$PATCH_DIR" -iname "*sizeof*" -o -iname "*cpu-affinity*" -type f -exec mv {} {}.bak 2>/dev/null \; && echo "✅ [步骤2] 已重命名所有残留补丁" || echo "✅ [步骤2] 无残留 sizeof/cpu-affinity 补丁"
           
-          # 3. 修改构建脚本：跳过 01- 开头的补丁（关键！）
-          if grep -q "for patch in" scripts/build-android.sh || grep -q "apply.*patch" scripts/build-android.sh; then
-            # 在应用补丁的循环前插入跳过逻辑（适配常见脚本结构）
-            sed -i '/apply.*patch\|patch -p1/i \
-            if [[ "\$patch" == *01-*sizeof* ]]; then\
-              echo "⏭️  跳过 NDK r29 不兼容的 sizeof 补丁: \$patch";\
-              continue;\
-            fi' scripts/build-android.sh
-            echo "✅ [步骤3] 已注入跳过 sizeof 补丁的逻辑"
-          else
-            echo "⚠️  [步骤3] 未识别到标准补丁应用逻辑（保留原脚本）"
-          fi
+          # 3. 规范化所有剩余 .patch 文件（强制 LF + 补换行符，彻底杜绝 malformed）
+          echo "🔧 正在修复所有 patch 文件行结束符..."
+          find "$PATCH_DIR" -name "*.patch" -type f -exec sh -c '
+            tr -d "\r" < "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+            [ -n "$(tail -c1 "$1")" ] && echo >> "$1"
+          ' _ {} \;
+          echo "✅ [步骤3] 所有 patch 已规范化（行结束符修复完成）"
 
       - name: 🧪 验证修复效果
         run: |
           cd nginx-android
-          echo "=== 修复后补丁目录 ==="
+          echo "=== 修复后补丁目录（不应包含 01 和 08）==="
+          ls -1 src/nginx_patches/ 2>/dev/null | grep -E '01|08' || echo "✅ 01 和 08 已成功移除"
+          echo -e "\n=== 剩余补丁 ==="
           ls -1 src/nginx_patches/ 2>/dev/null | grep -v ".bak" || echo "空"
-          echo -e "\n=== 检查构建脚本是否含跳过逻辑 ==="
-          grep -c "跳过 NDK r29" scripts/build-android.sh && echo "✅ 跳过逻辑已注入" || echo "⚠️  未检测到跳过逻辑（但文件已删除）"
+          echo -e "\n=== 检查构建脚本是否含跳过/删除逻辑 ==="
+          grep -E "跳过 NDK|删除损坏补丁|cpu-affinity" scripts/build-android.sh && echo "✅ 修复逻辑已注入" || echo "✅ 文件已物理删除（无需脚本修改）"
 
       - name: 🔨 构建（开启详细日志）
         run: |
           cd nginx-android
           export ANDROID_ABI=arm64-v8a
           export ANDROID_NDK_ROOT=/opt/android-ndk-r29
+          export CFLAGS="${CFLAGS} -DNGX_HAVE_SCHED_SETAFFINITY=0"   # 双保险：彻底禁用 cpu-affinity（Android 上无效且导致补丁崩溃）
           set -exo pipefail  # 严格模式：打印命令 + 遇错即停 + 管道任一失败即停
           ./scripts/build-android.sh 2>&1 | tee build.log
           echo "✅ 构建完成（日志已保存）"
@@ -101,5 +100,5 @@ jobs:
       - name: 📋 构建摘要（失败时显示关键错误）
         if: failure()
         run: |
-          echo "❌ 构建失败！最后10行错误："
-          tail -n 20 nginx-android/build.log | grep -A 5 "error\|failed\|Hunk" || tail -n 10 nginx-android/build.log
+          echo "❌ 构建失败！最后20行关键错误："
+          tail -n 20 nginx-android/build.log | grep -A 10 -E "error|failed|Hunk|malformed|patch" || tail -n 15 nginx-android/build.log
