@@ -10,8 +10,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Clone nginx-android repository
+        run: git clone https://github.com/ryanlee486/nginx-android.git
 
       - name: Download Android NDK r27
         run: |
@@ -21,13 +21,14 @@ jobs:
 
       - name: Build Nginx for arm64-v8a
         run: |
+          cd nginx-android
           export ANDROID_NDK_ROOT=/opt/android-ndk-r27
-          ./scripts/build-android.sh --arch arm64-v8a
+          ANDROID_ARCHS=x86_64 ./scripts/build-android.sh --arch arm64-v8a
 
       - name: Package binary
         run: |
           mkdir -p artifacts
-          cp build/nginx-arm64-v8a/nginx artifacts/nginx-arm64
+          cp nginx-android/build/nginx-arm64-v8a/nginx artifacts/nginx-arm64
           cd artifacts
           zip -r ../nginx-arm64-magisk.zip .
 
