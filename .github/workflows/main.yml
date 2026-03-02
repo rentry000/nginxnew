@@ -1,4 +1,4 @@
-name: Build Nginx 1.29.5 for Android arm64-v8a (NDK r29)
+name: Build Original Nginx for Android arm64-v8a (NDK r29)
 
 on:
   workflow_dispatch:
@@ -10,13 +10,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: 🌱 克隆仓库并检查结构
+      - name: 🌱 克隆原仓库并检查结构
         run: |
           git clone https://github.com/ryanlee486/nginx-android.git
           cd nginx-android
           tree -L 2  # 打印目录结构辅助分析
           find . -name "*.sh" -type f -exec chmod +x {} \;
-          echo "✅ 仓库克隆及权限修复完成"
+          echo "✅ 原仓库克隆及权限修复完成"
 
       - name: 📦 安装依赖
         run: |
@@ -32,57 +32,43 @@ jobs:
           echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
           echo "✅ NDK r29 配置完成"
 
-      - name: 📥 替换为 Nginx 1.29.5（强制路径）
-        run: |
-          # 强制将 Nginx 源码替换到原仓库的 nginx 目录
-          NGINX_SRC_DIR="nginx-android/nginx"
-          rm -rf "$NGINX_SRC_DIR"/*
-          wget -q https://github.com/nginx/nginx/releases/download/release-1.29.5/nginx-1.29.5.zip -O nginx.zip
-          unzip -q nginx.zip
-          mv nginx-1.29.5/* "$NGINX_SRC_DIR/"
-          rm -rf nginx-1.29.5 nginx.zip
-          echo "✅ 已替换为 Nginx 1.29.5 到 $NGINX_SRC_DIR"
-
-      - name: 🛠️ 强制删除所有补丁文件（终极方案）
+      - name: 🛠️ 修复问题补丁（终极方案）
         run: |
           cd nginx-android
-          # 递归删除所有 .patch 文件（包括子目录）
-          find . -name "*.patch" -exec rm -f {} \;
-          echo "✅ 已删除所有补丁文件"
+          # 找到问题补丁并修复
+          PATCH_FILE="src/nginx_patches/01-cross-compilation-sizeof.patch"
+          if [ -f "$PATCH_FILE" ]; then
+            echo "🔍 修复补丁文件: $PATCH_FILE"
+            # 移除补丁中的无效字符（示例修复）
+            sed -i '/^[^+-@ ]/d' "$PATCH_FILE"  # 移除非法行首字符
+            sed -i 's/^[[:space:]]*$//' "$PATCH_FILE"  # 移除空行
+            echo "✅ 补丁修复完成"
+          else
+            echo "❌ 未找到问题补丁，构建可能失败"
+            exit 1
+          fi
 
-      - name: 🛠️ 彻底修改构建脚本（禁用补丁逻辑）
+      - name: 🛠️ 调整构建脚本路径
         run: |
           cd nginx-android
           if [ -f "scripts/build-android.sh" ]; then
-            # 1. 删除所有补丁相关函数
-            sed -i '/apply_patch/d' scripts/build-android.sh
-            
-            # 2. 删除补丁循环（匹配所有可能模式）
-            sed -i '/for.*patch.*in.*patches\/\*.patch/,/done/d' scripts/build-android.sh
-            
-            # 3. 删除补丁相关变量
-            sed -i '/PATCH_DIR/d' scripts/build-android.sh
-            
-            # 4. 删除补丁验证逻辑
-            sed -i '/patch --dry-run/d' scripts/build-android.sh
-            
-            # 5. 替换旧版本号
-            sed -i 's/nginx-[0-9.]*\.zip/nginx-1.29.5.zip/' scripts/build-android.sh
-            echo "✅ 构建脚本已彻底移除补丁逻辑"
+            # 修正补丁目录路径（根据实际结构调整）
+            sed -i 's|patches/|src/nginx_patches/|' scripts/build-android.sh
+            echo "✅ 构建脚本路径修复完成"
           else
             echo "❌ 未找到构建脚本，构建无法继续"
             exit 1
           fi
 
-      - name: 🧐 最终验证补丁状态
+      - name: 🧐 调试补丁状态
         run: |
           cd nginx-android
-          echo "=== 当前目录下的补丁文件 ==="
+          echo "=== 当前补丁文件 ==="
           find . -name "*.patch"
-          echo "=== 构建脚本中与补丁相关的代码 ==="
-          grep -i "patch" scripts/build-android.sh
+          echo "=== 构建脚本补丁路径 ==="
+          grep "patches/" scripts/build-android.sh
 
-      - name: 🔨 构建 Nginx 1.29.5 for arm64-v8a
+      - name: 🔨 构建 Nginx for arm64-v8a
         run: |
           cd nginx-android
           export ANDROID_ABI=arm64-v8a
@@ -94,5 +80,5 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: nginx-1.29.5-android-arm64-v8a
+          name: nginx-android-arm64-v8a
           path: nginx-android/build/install/arm64-v8a/
