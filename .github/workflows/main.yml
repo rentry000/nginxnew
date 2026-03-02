@@ -91,7 +91,7 @@ jobs:
 
       - name: 📤 上传构建产物
         if: success()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4  # 已升级到最新的 v4 版本
         with:
           name: nginx-android-arm64-v8a
           path: nginx-android/build/install/arm64-v8a/
