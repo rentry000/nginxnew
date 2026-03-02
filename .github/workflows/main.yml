@@ -1,4 +1,4 @@
-name: Build Original Nginx for Android arm64-v8a (NDK r29 Final)
+name: Build Nginx for Android arm64-v8a (NDK r29 - sizeof 问题根治)
 
 on:
   workflow_dispatch:
@@ -10,13 +10,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: 🌱 克隆原仓库
+      - name: 🌱 克隆仓库
         run: |
           git clone https://github.com/ryanlee486/nginx-android.git
           cd nginx-android
-          # 修复脚本权限
           find . -name "*.sh" -type f -exec chmod +x {} \;
-          echo "✅ 仓库克隆完成"
+          echo "✅ 仓库准备完成"
 
       - name: 📦 安装依赖
         run: |
@@ -24,54 +23,83 @@ jobs:
           sudo apt-get install -y build-essential libssl-dev zlib1g-dev patch wget unzip tree
           echo "✅ 依赖安装完成"
 
-      - name: 📦 配置 Android NDK r29
+      - name: 📦 配置 NDK r29
         run: |
           wget -q https://dl.google.com/android/repository/android-ndk-r29-linux.zip -O ndk.zip
           unzip -q ndk.zip -d /opt
-          export ANDROID_NDK_ROOT=/opt/android-ndk-r29
-          echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
-          echo "✅ NDK r29 配置完成"
+          echo "ANDROID_NDK_ROOT=/opt/android-ndk-r29" >> $GITHUB_ENV
+          echo "✅ NDK 配置完成"
 
-      - name: 🔍 调试：检查构建脚本内容 (关键)
+      - name: 🔍 诊断：确认补丁文件与脚本引用
         run: |
           cd nginx-android
-          echo "=== 构建脚本头部信息 ==="
-          head -n 20 scripts/build-android.sh
-          echo "=== 搜索 patch 关键词 ==="
-          grep -n "patch" scripts/build-android.sh | head -5
-
-      - name: 🛠️ 强制移除冲突补丁 (核心修复)
-        run: |
-          cd nginx-android
-          # NDK r29 (Clang 21) 不需要这个补丁，且会导致构建失败
-          CONFLICT_PATCH="src/nginx_patches/01-cross-compilation-sizeof.patch"
-          if [ -f "$CONFLICT_PATCH" ]; then
-            echo "🗑️ 检测到冲突补丁，正在移除: $CONFLICT_PATCH"
-            rm -f "$CONFLICT_PATCH"
-            echo "✅ 冲突补丁已移除"
+          echo "=== 补丁目录内容 ==="
+          ls -1 src/nginx_patches/ 2>/dev/null || echo "⚠️ 目录不存在"
+          echo -e "\n=== 检查构建脚本中01补丁引用 ==="
+          if grep -n "01.*sizeof\|cross.*compilation.*sizeof" scripts/build-android.sh; then
+            echo "⚠️  发现潜在引用（将处理）"
           else
-            echo "✅ 补丁文件不存在，无需处理"
+            echo "✅ 未发现硬编码引用"
           fi
 
-      - name: 🧐 调试：验证补丁目录状态
+      - name: 🛠️ 根治 sizeof 问题（三重保障）
         run: |
           cd nginx-android
-          echo "=== 当前存在的补丁文件 ==="
-          find src/nginx_patches -type f -name "*.patch" | sort
+          PATCH_DIR="src/nginx_patches"
+          TARGET_PATCH="01-cross-compilation-sizeof.patch"
+          
+          # 1. 物理删除补丁文件
+          if [ -f "$PATCH_DIR/$TARGET_PATCH" ]; then
+            rm -f "$PATCH_DIR/$TARGET_PATCH"
+            echo "✅ [步骤1] 已删除冲突补丁文件"
+          else
+            echo "⚠️  [步骤1] 补丁文件不存在（可能已被处理）"
+          fi
+          
+          # 2. 重命名同名残留（防御性处理）
+          find "$PATCH_DIR" -iname "*sizeof*" -type f -exec mv {} {}.bak 2>/dev/null \; && echo "✅ [步骤2] 已重命名所有 sizeof 相关补丁" || echo "✅ [步骤2] 无残留 sizeof 补丁"
+          
+          # 3. 修改构建脚本：跳过 01- 开头的补丁（关键！）
+          if grep -q "for patch in" scripts/build-android.sh || grep -q "apply.*patch" scripts/build-android.sh; then
+            # 在应用补丁的循环前插入跳过逻辑（适配常见脚本结构）
+            sed -i '/apply.*patch\|patch -p1/i \
+            if [[ "\$patch" == *01-*sizeof* ]]; then\
+              echo "⏭️  跳过 NDK r29 不兼容的 sizeof 补丁: \$patch";\
+              continue;\
+            fi' scripts/build-android.sh
+            echo "✅ [步骤3] 已注入跳过 sizeof 补丁的逻辑"
+          else
+            echo "⚠️  [步骤3] 未识别到标准补丁应用逻辑（保留原脚本）"
+          fi
 
-      - name: 🔨 构建 Nginx for arm64-v8a
+      - name: 🧪 验证修复效果
+        run: |
+          cd nginx-android
+          echo "=== 修复后补丁目录 ==="
+          ls -1 src/nginx_patches/ 2>/dev/null | grep -v ".bak" || echo "空"
+          echo -e "\n=== 检查构建脚本是否含跳过逻辑 ==="
+          grep -c "跳过 NDK r29" scripts/build-android.sh && echo "✅ 跳过逻辑已注入" || echo "⚠️  未检测到跳过逻辑（但文件已删除）"
+
+      - name: 🔨 构建（开启详细日志）
         run: |
           cd nginx-android
           export ANDROID_ABI=arm64-v8a
-          export ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT
-          # 开启 bash 调试模式，遇到错误立即停止并打印行号
-          set -ex
-          ./scripts/build-android.sh
-          # set +x (注释掉，让上面的生效)
+          export ANDROID_NDK_ROOT=/opt/android-ndk-r29
+          set -exo pipefail  # 严格模式：打印命令 + 遇错即停 + 管道任一失败即停
+          ./scripts/build-android.sh 2>&1 | tee build.log
+          echo "✅ 构建完成（日志已保存）"
 
-      - name: 📤 上传构建产物
-        if: success()
+      - name: 📤 上传产物与日志
+        if: always()  # 即使失败也上传日志便于诊断
         uses: actions/upload-artifact@v4
         with:
-          name: nginx-android-arm64-v8a
-          path: nginx-android/build/install/arm64-v8a/
+          name: nginx-build-artifacts
+          path: |
+            nginx-android/build/install/arm64-v8a/
+            nginx-android/build.log
+
+      - name: 📋 构建摘要（失败时显示关键错误）
+        if: failure()
+        run: |
+          echo "❌ 构建失败！最后10行错误："
+          tail -n 20 nginx-android/build.log | grep -A 5 "error\|failed\|Hunk" || tail -n 10 nginx-android/build.log
