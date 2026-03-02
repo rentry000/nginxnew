@@ -1,4 +1,4 @@
-name: Build Original Nginx for Android arm64-v8a (NDK r29)
+name: Build Original Nginx for Android arm64-v8a (NDK r29 Final)
 
 on:
   workflow_dispatch:
@@ -10,13 +10,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: 🌱 克隆原仓库并检查结构
+      - name: 🌱 克隆原仓库
         run: |
           git clone https://github.com/ryanlee486/nginx-android.git
           cd nginx-android
-          tree -L 2  # 打印目录结构辅助分析
+          # 修复脚本权限
           find . -name "*.sh" -type f -exec chmod +x {} \;
-          echo "✅ 原仓库克隆及权限修复完成"
+          echo "✅ 仓库克隆完成"
 
       - name: 📦 安装依赖
         run: |
@@ -32,60 +32,42 @@ jobs:
           echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
           echo "✅ NDK r29 配置完成"
 
-      - name: 🛠️ 修复补丁路径（关键修复）
+      - name: 🔍 调试：检查构建脚本内容 (关键)
         run: |
           cd nginx-android
-          if [ -f "scripts/build-android.sh" ]; then
-            # 将构建脚本中的补丁路径从 "patches/" 改为实际路径 "src/nginx_patches/"
-            sed -i 's|patches/|src/nginx_patches/|g' scripts/build-android.sh
-            echo "✅ 构建脚本补丁路径已修正为 src/nginx_patches/"
+          echo "=== 构建脚本头部信息 ==="
+          head -n 20 scripts/build-android.sh
+          echo "=== 搜索 patch 关键词 ==="
+          grep -n "patch" scripts/build-android.sh | head -5
+
+      - name: 🛠️ 强制移除冲突补丁 (核心修复)
+        run: |
+          cd nginx-android
+          # NDK r29 (Clang 21) 不需要这个补丁，且会导致构建失败
+          CONFLICT_PATCH="src/nginx_patches/01-cross-compilation-sizeof.patch"
+          if [ -f "$CONFLICT_PATCH" ]; then
+            echo "🗑️ 检测到冲突补丁，正在移除: $CONFLICT_PATCH"
+            rm -f "$CONFLICT_PATCH"
+            echo "✅ 冲突补丁已移除"
           else
-            echo "❌ 未找到构建脚本，构建无法继续"
-            exit 1
+            echo "✅ 补丁文件不存在，无需处理"
           fi
 
-      - name: 🛠️ 验证并修复问题补丁
+      - name: 🧐 调试：验证补丁目录状态
         run: |
           cd nginx-android
-          PATCH_FILE="src/nginx_patches/01-cross-compilation-sizeof.patch"
-          if [ -f "$PATCH_FILE" ]; then
-            echo "🔍 验证补丁文件: $PATCH_FILE"
-            # 验证补丁格式
-            if ! patch --dry-run -p1 < "$PATCH_FILE" > /dev/null 2>&1; then
-              echo "❌ 补丁格式无效，尝试修复..."
-              # 修复补丁（移除非法字符和空行）
-              sed -i '/^[^+-@ ]/d' "$PATCH_FILE"
-              sed -i '/^[[:space:]]*$/d' "$PATCH_FILE"
-              # 再次验证
-              if ! patch --dry-run -p1 < "$PATCH_FILE" > /dev/null 2>&1; then
-                echo "❌ 补丁无法修复，将跳过"
-                rm -f "$PATCH_FILE"
-              else
-                echo "✅ 补丁修复成功"
-              fi
-            else
-              echo "✅ 补丁格式有效"
-            fi
-          else
-            echo "❌ 未找到问题补丁，构建可能失败"
-            exit 1
-          fi
-
-      - name: 🧐 最终调试补丁状态
-        run: |
-          cd nginx-android
-          echo "=== 当前补丁文件 ==="
-          find . -name "*.patch"
-          echo "=== 构建脚本补丁路径 ==="
-          grep "src/nginx_patches" scripts/build-android.sh
+          echo "=== 当前存在的补丁文件 ==="
+          find src/nginx_patches -type f -name "*.patch" | sort
 
       - name: 🔨 构建 Nginx for arm64-v8a
         run: |
           cd nginx-android
           export ANDROID_ABI=arm64-v8a
           export ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT
+          # 开启 bash 调试模式，遇到错误立即停止并打印行号
+          set -ex
           ./scripts/build-android.sh
-          echo "✅ 构建完成"
+          # set +x (注释掉，让上面的生效)
 
       - name: 📤 上传构建产物
         if: success()
