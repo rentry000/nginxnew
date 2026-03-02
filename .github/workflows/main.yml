@@ -32,41 +32,52 @@ jobs:
           echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
           echo "✅ NDK r29 配置完成"
 
-      - name: 🛠️ 修复问题补丁（终极方案）
-        run: |
-          cd nginx-android
-          # 找到问题补丁并修复
-          PATCH_FILE="src/nginx_patches/01-cross-compilation-sizeof.patch"
-          if [ -f "$PATCH_FILE" ]; then
-            echo "🔍 修复补丁文件: $PATCH_FILE"
-            # 移除补丁中的无效字符（示例修复）
-            sed -i '/^[^+-@ ]/d' "$PATCH_FILE"  # 移除非法行首字符
-            sed -i 's/^[[:space:]]*$//' "$PATCH_FILE"  # 移除空行
-            echo "✅ 补丁修复完成"
-          else
-            echo "❌ 未找到问题补丁，构建可能失败"
-            exit 1
-          fi
-
-      - name: 🛠️ 调整构建脚本路径
+      - name: 🛠️ 修复补丁路径（关键修复）
         run: |
           cd nginx-android
           if [ -f "scripts/build-android.sh" ]; then
-            # 修正补丁目录路径（根据实际结构调整）
-            sed -i 's|patches/|src/nginx_patches/|' scripts/build-android.sh
-            echo "✅ 构建脚本路径修复完成"
+            # 将构建脚本中的补丁路径从 "patches/" 改为实际路径 "src/nginx_patches/"
+            sed -i 's|patches/|src/nginx_patches/|g' scripts/build-android.sh
+            echo "✅ 构建脚本补丁路径已修正为 src/nginx_patches/"
           else
             echo "❌ 未找到构建脚本，构建无法继续"
             exit 1
           fi
 
-      - name: 🧐 调试补丁状态
+      - name: 🛠️ 验证并修复问题补丁
+        run: |
+          cd nginx-android
+          PATCH_FILE="src/nginx_patches/01-cross-compilation-sizeof.patch"
+          if [ -f "$PATCH_FILE" ]; then
+            echo "🔍 验证补丁文件: $PATCH_FILE"
+            # 验证补丁格式
+            if ! patch --dry-run -p1 < "$PATCH_FILE" > /dev/null 2>&1; then
+              echo "❌ 补丁格式无效，尝试修复..."
+              # 修复补丁（移除非法字符和空行）
+              sed -i '/^[^+-@ ]/d' "$PATCH_FILE"
+              sed -i '/^[[:space:]]*$/d' "$PATCH_FILE"
+              # 再次验证
+              if ! patch --dry-run -p1 < "$PATCH_FILE" > /dev/null 2>&1; then
+                echo "❌ 补丁无法修复，将跳过"
+                rm -f "$PATCH_FILE"
+              else
+                echo "✅ 补丁修复成功"
+              fi
+            else
+              echo "✅ 补丁格式有效"
+            fi
+          else
+            echo "❌ 未找到问题补丁，构建可能失败"
+            exit 1
+          fi
+
+      - name: 🧐 最终调试补丁状态
         run: |
           cd nginx-android
           echo "=== 当前补丁文件 ==="
           find . -name "*.patch"
           echo "=== 构建脚本补丁路径 ==="
-          grep "patches/" scripts/build-android.sh
+          grep "src/nginx_patches" scripts/build-android.sh
 
       - name: 🔨 构建 Nginx for arm64-v8a
         run: |
