@@ -19,16 +19,24 @@ jobs:
           unzip -q ndk.zip -d /opt
           export ANDROID_NDK_ROOT=/opt/android-ndk-r27
 
-      - name: Build Nginx for arm64-v8a (remove problematic patch)
+      - name: Modify build script to skip problematic patch
+        run: |
+          cd nginx-android
+
+          # 备份原始脚本
+          cp scripts/build-android.sh scripts/build-android.sh.bak
+
+          # 用 sed 删除或注释掉包含 '01-cross-compilation-sizeof.patch' 的行
+          # 假设脚本里有类似 "apply_patch 01-cross-compilation-sizeof.patch" 的调用
+          sed -i '/01-cross-compilation-sizeof.patch/d' scripts/build-android.sh
+
+          # 如果脚本有多个 patch 调用，可以打印看内容（debug）
+          grep -i "patch" scripts/build-android.sh || echo "No patch calls found in script"
+
+      - name: Build Nginx for arm64-v8a
         run: |
           cd nginx-android
           export ANDROID_NDK_ROOT=/opt/android-ndk-r27
-
-          # 彻底移除问题 patch 文件，让脚本找不到就跳过
-          rm -f patches/01-cross-compilation-sizeof.patch || true
-
-          # 如果脚本有其他 patch 失败，可再 rm 更多；目前先只移除这个
-          # 执行构建
           ANDROID_ARCHS=x86_64 ./scripts/build-android.sh --arch arm64-v8a
 
       - name: Package binary
