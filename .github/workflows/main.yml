@@ -10,50 +10,45 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout (optional, but good practice)
-        uses: actions/checkout@v4
-
       - name: Clone nginx-android repository
         run: git clone https://github.com/ryanlee486/nginx-android.git
 
-      - name: Download Android NDK r27
+      - name: Download Android NDK r29
         run: |
-          wget -q https://dl.google.com/android/repository/android-ndk-r27-linux.zip -O ndk.zip
+          wget -q https://dl.google.com/android/repository/android-ndk-r29-linux.zip -O ndk.zip
           unzip -q ndk.zip -d /opt
-          echo "ANDROID_NDK_ROOT=/opt/android-ndk-r27" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=/opt/android-ndk-r29" >> $GITHUB_ENV
 
-      - name: Modify build script to skip problematic patch
+      - name: Remove problematic patch file (Force Skip)
         run: |
-          cd nginx-android
-
-          # 备份原始脚本（可选）
-          cp scripts/build-android.sh scripts/build-android.sh.bak
-
-          # 方法1：直接删除包含 '01-cross-compilation-sizeof.patch' 的行
-          sed -i '/01-cross-compilation-sizeof.patch/d' scripts/build-android.sh
-
-          # 方法2（备用）：如果上面没生效，也可以尝试注释掉（取消下面一行的注释）
-          # sed -i 's/.*01-cross-compilation-sizeof\.patch.*/# &/' scripts/build-android.sh
-
-          # Debug: 打印相关行确认已移除
-          echo "Patching lines after modification:"
-          grep -n "01-cross-compilation-sizeof" scripts/build-android.sh || echo "Patch line successfully removed."
+          # 直接删除导致失败的补丁文件
+          rm -f nginx-android/patches/nginx-1.25.3/01-cross-compilation-sizeof.patch
+          
+          # 额外保险：如果脚本里硬编码了这个补丁，也尝试注释掉脚本里的调用
+          # 这里使用 sed 强制注释掉包含该文件名的行
+          sed -i 's/.*01-cross-compilation-sizeof\.patch.*/echo "Skipping problematic patch"/' nginx-android/scripts/build-android.sh
 
       - name: Build Nginx for arm64-v8a
         run: |
           cd nginx-android
-          export ANDROID_NDK_ROOT=/opt/android-ndk-r27
-          # 注意：你原命令中的 ANDROID_ARCHS=x86_64 可能是笔误，这里只构建 arm64-v8a
+          # 注意：原代码中的 ANDROID_ARCHS=x86_64 是错误的，这里修正
           ./scripts/build-android.sh --arch arm64-v8a
 
       - name: Package binary
         run: |
           mkdir -p artifacts
-          cp nginx-android/build/nginx-arm64-v8a/nginx artifacts/nginx-arm64
-          cd artifacts
-          zip -r ../nginx-arm64-magisk.zip .
+          # 检查构建目录是否存在，防止拷贝失败
+          if [ -f "nginx-android/build/nginx-arm64-v8a/nginx" ]; then
+            cp nginx-android/build/nginx-arm64-v8a/nginx artifacts/nginx-arm64
+            cd artifacts
+            zip -r ../nginx-arm64-magisk.zip .
+          else
+            echo "Error: Nginx binary not found. Build failed."
+            exit 1
+          fi
 
       - name: Upload Release
+        if: success()
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.run_number }}
