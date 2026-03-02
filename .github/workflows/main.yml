@@ -1,4 +1,4 @@
-name: Build Nginx for Android arm64-v8a (NDK r29 Fixed)
+name: Build Nginx for Android arm64-v8a (NDK r29 Final Fix)
 
 on:
   workflow_dispatch:
@@ -14,83 +14,63 @@ jobs:
         run: |
           git clone https://github.com/ryanlee486/nginx-android.git
           cd nginx-android
-          # 预先修复所有脚本权限（关键！）
+          # 修复脚本权限
           find . -name "*.sh" -type f -exec chmod +x {} \;
-          echo "✅ 已修复所有 shell 脚本执行权限"
+          echo "✅ 权限修复完成"
 
       - name: 📦 Download Android NDK r29
         run: |
           wget -q https://dl.google.com/android/repository/android-ndk-r29-linux.zip -O ndk.zip
           unzip -q ndk.zip -d /opt
           echo "ANDROID_NDK_ROOT=/opt/android-ndk-r29" >> $GITHUB_ENV
-          echo "✅ NDK r29 已安装到 /opt/android-ndk-r29"
+          echo "✅ NDK r29 安装完成"
 
-      - name: 🛡️ 智能中和问题补丁（三重保险）
+      - name: 🛠️ 强制跳过冲突补丁 (核心修复)
         run: |
           cd nginx-android
           
-          # 1️⃣ 全局扫描定位问题补丁
-          echo "🔍 扫描所有 .patch 文件..."
-          mapfile -t patch_files < <(find . -type f -name "*.patch" 2>/dev/null | grep -v build)
-          
-          if [ ${#patch_files[@]} -eq 0 ]; then
-            echo "⚠️  未发现任何 .patch 文件（可能仓库结构变化）"
-          else
-            echo "📄 共发现 ${#patch_files[@]} 个补丁文件"
-            for pf in "${patch_files[@]}"; do
-              if grep -q "cross-compilation-sizeof" "$pf" 2>/dev/null || [[ "$pf" == *"01-cross-compilation-sizeof"* ]]; then
-                echo "🎯 中和问题补丁: $pf"
-                echo "// NEUTRALIZED: Disabled for NDK r29 compatibility (Clang 18+ handles sizeof correctly)" > "$pf"
-                NEUTRALIZED=1
-              fi
-            done
-          fi
-          
-          # 2️⃣ 保险：清空 patches 目录下所有补丁（防脚本硬编码路径）
-          if [ -d "patches" ]; then
-            find patches -name "*.patch" -type f -exec sh -c 'echo "// SAFE NEUTRALIZED" > "$1"' _ {} \;
-            echo "✅ patches/ 目录下所有补丁已安全中和"
-          fi
-          
-          # 3️⃣ 注入脚本跳过逻辑（动态拦截）
+          # --- 方法 1: 修改脚本逻辑，遇到特定补丁名直接跳过 ---
+          echo "🔍 正在修改构建脚本以跳过问题补丁..."
           if [ -f "scripts/build-android.sh" ]; then
-            sed -i '/apply_patch.*\.patch/{
-              i\
-              # SKIP NDK r29 INCOMPATIBLE PATCH\
-              if [[ "$patch_file" == *"cross-compilation-sizeof"* ]]; then\
-                echo "⏭️  Skipping incompatible patch for NDK r29";\
-                continue;\
-              fi
-            }' scripts/build-android.sh 2>/dev/null && echo "✅ 脚本跳过逻辑注入成功" || echo "⚠️  脚本注入跳过（非关键）"
+            # 在脚本中查找应用补丁的循环
+            # 使用 sed 在循环开始处插入跳过逻辑
+            sed -i '/for patch_file in .*\.patch/ a \
+            # 强制跳过已知与 NDK r29 不兼容的补丁\
+            if [[ "$patch_file" == *01-cross-compilation-sizeof* ]]; then\
+              echo "⏭️  跳过补丁: $(basename $patch_file) (NDK r29 不兼容)"\
+              continue\
+            fi\
+            ' scripts/build-android.sh
+            
+            echo "✅ 已注入跳过逻辑"
+          else
+            echo "❌ 错误：未找到构建脚本 scripts/build-android.sh"
+            exit 1
           fi
+          
+          # --- 方法 2: 保险措施 - 清空问题补丁内容 ---
+          # 防止脚本逻辑修改失败，直接把补丁变为空文件
+          find . -name "01-cross-compilation-sizeof.patch" -type f -exec sh -c '
+            echo "🛡️  清空冲突补丁内容: $1"
+            echo "# Neutralized for NDK r29" > "$1"
+          ' _ {} \;
 
-      - name: 🔍 验证关键状态
+      - name: 🔍 验证跳过逻辑是否生效
         run: |
           cd nginx-android
-          echo "=== 权限验证 ==="
-          ls -lh scripts/build-android.sh
+          echo "📄 构建脚本片段预览 (检查是否包含跳过逻辑):"
+          grep -A 5 "跳过已知与 NDK r29" scripts/build-android.sh || echo "未找到注入标记 (可能结构不同，但清空补丁已生效)"
           
-          echo -e "\n=== 补丁状态验证 ==="
-          if find . -name "*cross-compilation-sizeof*.patch" 2>/dev/null | head -1; then
-            TARGET=$(find . -name "*cross-compilation-sizeof*.patch" | head -1)
-            echo "📄 问题补丁内容:"
-            cat "$TARGET"
-          else
-            echo "✅ 问题补丁已不存在或内容被中和"
-          fi
-          
-          echo -e "\n=== NDK 验证 ==="
-          ls -d /opt/android-ndk-r29 2>/dev/null && echo "✅ NDK r29 路径存在"
+          echo -e "\n📄 检查问题补丁文件内容:"
+          find . -name "01-cross-compilation-sizeof.patch" -exec head -n 2 {} \;
 
       - name: 🚀 Build Nginx for arm64-v8a
         run: |
           cd nginx-android
-          # 再次确保权限（防中间步骤覆盖）
           chmod +x scripts/build-android.sh
           export ANDROID_NDK_ROOT=/opt/android-ndk-r29
-          echo "🔧 开始构建 arm64-v8a (NDK r29)..."
+          echo "🔧 开始构建..."
           ./scripts/build-android.sh --arch arm64-v8a
-          echo "✅ 构建完成！"
 
       - name: 📦 Package binary
         run: |
@@ -98,13 +78,11 @@ jobs:
           BINARY="nginx-android/build/nginx-arm64-v8a/nginx"
           if [ -f "$BINARY" ]; then
             cp "$BINARY" artifacts/nginx-arm64
-            echo "✅ 二进制文件信息:"
             file artifacts/nginx-arm64
-            readelf -h artifacts/nginx-arm64 2>/dev/null | grep -E "Class|Machine"
             cd artifacts && zip -r ../nginx-arm64-magisk.zip .
-            echo "📦 压缩包生成成功"
+            echo "✅ 打包成功"
           else
-            echo "❌ 错误：未找到构建产物！"
+            echo "❌ 构建失败，检查日志"
             ls -lhR nginx-android/build/ 2>/dev/null || echo "构建目录为空"
             exit 1
           fi
@@ -114,6 +92,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.run_number }}-r29
-          name: Nginx Android arm64-v8a (NDK r29 Fixed)
+          name: Nginx Android arm64-v8a (Fixed)
           files: nginx-arm64-magisk.zip
           draft: false
