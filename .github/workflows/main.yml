@@ -37,40 +37,41 @@ jobs:
           echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
           echo "✅ NDK r29 配置完成"
 
-      - name: 📥 替换为 Nginx 1.29.5（自动定位路径）
+      - name: 📥 替换为 Nginx 1.29.5（修复路径）
         run: |
-          NGINX_SRC_DIR=$(find nginx-android -name "auto" -type d | grep -o '.*/nginx' | head -n1)
-          if [ -z "$NGINX_SRC_DIR" ]; then
-            NGINX_SRC_DIR="nginx-android/nginx"
+          # 查找原仓库中的 Nginx 源码目录（假设在 nginx-android/src/nginx）
+          NGINX_SRC_DIR="nginx-android/src/nginx"
+          if [ -d "$NGINX_SRC_DIR" ]; then
+            echo "检测到 Nginx 源码目录: $NGINX_SRC_DIR"
+            rm -rf "$NGINX_SRC_DIR"/*
+          else
+            echo "❌ 未找到默认源码目录，尝试创建"
             mkdir -p "$NGINX_SRC_DIR"
           fi
-          echo "Nginx 源码目录: $NGINX_SRC_DIR"
-          rm -rf "$NGINX_SRC_DIR"/*
+          
           wget -q https://github.com/nginx/nginx/releases/download/release-1.29.5/nginx-1.29.5.zip -O nginx.zip
           unzip -q nginx.zip
           mv nginx-1.29.5/* "$NGINX_SRC_DIR/"
           rm -rf nginx-1.29.5 nginx.zip
           echo "✅ 已替换为 Nginx 1.29.5"
 
-      - name: 🛠️ 彻底删除问题补丁（全路径搜索）
+      - name: 🛠️ 彻底清除所有补丁（关键修复）
         run: |
-          PATCH_FILES=$(find nginx-android -name "01-cross-compilation-sizeof.patch")
-          if [ -n "$PATCH_FILES" ]; then
-            rm -f $PATCH_FILES
-            echo "✅ 已删除所有问题补丁: $PATCH_FILES"
-          else
-            echo "ℹ️ 未找到问题补丁"
-          fi
+          cd nginx-android
+          # 删除所有 .patch 文件（包括子目录）
+          find . -name "*.patch" -exec rm -f {} \;
+          echo "✅ 已删除所有补丁文件"
 
       - name: 🛠️ 禁用构建脚本的补丁逻辑
         run: |
           cd nginx-android
           if [ -f "scripts/build-android.sh" ]; then
+            # 注释掉补丁应用代码块
             sed -i '/for patch in patches\/\*.patch/,/done/ s/^/#/' scripts/build-android.sh
             echo "✅ 已禁用补丁应用逻辑"
           fi
 
-      - name: 🧐 调试补丁路径（新增调试步骤）
+      - name: 🧐 调试补丁路径（验证修复）
         run: |
           cd nginx-android
           echo "=== 当前目录下的补丁文件 ==="
