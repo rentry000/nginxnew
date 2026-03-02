@@ -1,0 +1,40 @@
+name: Build Nginx for Android arm64-v8a
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Android NDK r27
+        run: |
+          wget -q https://dl.google.com/android/repository/android-ndk-r27-linux.zip -O ndk.zip
+          unzip -q ndk.zip -d /opt
+          export ANDROID_NDK_ROOT=/opt/android-ndk-r27
+
+      - name: Build Nginx for arm64-v8a
+        run: |
+          export ANDROID_NDK_ROOT=/opt/android-ndk-r27
+          ./scripts/build-android.sh --arch arm64-v8a
+
+      - name: Package binary
+        run: |
+          mkdir -p artifacts
+          cp build/nginx-arm64-v8a/nginx artifacts/nginx-arm64
+          cd artifacts
+          zip -r ../nginx-arm64-magisk.zip .
+
+      - name: Upload Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Nginx Android arm64-v8a Binary
+          files: nginx-arm64-magisk.zip
+          draft: false
