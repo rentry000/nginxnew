@@ -1,4 +1,4 @@
-name: Build Nginx for Android arm64-v8a (NDK r29 - sizeof 最终根治版)
+name: Build Nginx for Android arm64-v8a (NDK r29 - sizeof 最终根治版 v4)
 
 on:
   workflow_dispatch:
@@ -30,67 +30,61 @@ jobs:
           echo "ANDROID_NDK_ROOT=/opt/android-ndk-r29" >> $GITHUB_ENV
           echo "✅ NDK 配置完成"
 
-      - name: 🛠️ 清理坏补丁（01 + 08）并规范化
+      - name: 🛠️ 清理坏补丁 + 规范化
         run: |
           cd nginx-android
           PATCH_DIR="src/nginx_patches"
           
-          # 删除已知坏补丁
-          for bad_patch in "01-cross-compilation-sizeof.patch" "08-android-cpu-affinity.patch"; do
-            if [ -f "$PATCH_DIR/$bad_patch" ]; then
-              rm -f "$PATCH_DIR/$bad_patch"
-              echo "✅ 已删除损坏补丁: $bad_patch"
-            fi
-          done
-          
-          # 重命名残留 + 规范化所有剩余 patch（强制 LF）
+          # 删除已知坏补丁（01 和 08）
+          rm -f "$PATCH_DIR"/01-cross-compilation-sizeof.patch "$PATCH_DIR"/08-android-cpu-affinity.patch 2>/dev/null || true
           find "$PATCH_DIR" -iname "*sizeof*" -o -iname "*cpu-affinity*" -type f -exec mv {} {}.bak 2>/dev/null \; || true
+          
+          # 规范化所有剩余 patch（防止 malformed）
           find "$PATCH_DIR" -name "*.patch" -type f -exec sh -c '
             tr -d "\r" < "$1" > "$1.tmp" && mv "$1.tmp" "$1"
             [ -n "$(tail -c1 "$1")" ] && echo >> "$1"
           ' _ {} \;
-          echo "✅ 坏补丁清理 + 所有 patch 规范化完成"
+          echo "✅ 坏补丁清理完成 + 剩余 patch 已规范化"
 
-      - name: 🩹 根治 sizeof（强制注入硬编码 stub - 最可靠方案）
+      - name: 🩹 精准根治 sizeof（修改 build-nginx.sh）
         run: |
           cd nginx-android
           
-          echo "🔧 正在修改 build-android.sh：在 rollback 后强制覆盖 sizeof 文件..."
+          echo "🔧 在 build-nginx.sh 中注入 sizeof 硬编码 stub（在 configure 前强制执行）..."
           
-          # 使用 sed 在 "Rolling back nginx source to clean state..." 之后立即插入 stub 创建代码
-          # 这确保无论 rollback 多少次，configure 运行前 sizeof 都是正确的 arm64-v8a 版本
-          sed -i '/Rolling back nginx source to clean state.../a \
-            echo "🛠️ 强制注入 arm64-v8a sizeof 硬编码 stub（绕过 Exec format error）"; \
-            mkdir -p nginx/auto/types; \
-            cat > nginx/auto/types/sizeof << '"'"'STUB_EOF'"'"' \
-            #!/bin/sh \
-            ngx_type="$1" \
-            case "$ngx_type" in \
-              int|unsigned\ int)                 echo " 4 bytes" ;; \
-              long|unsigned\ long|size_t|off_t|time_t|"void *") echo " 8 bytes" ;; \
-              "long long"|"unsigned long long")  echo " 8 bytes" ;; \
-              *)                                 echo " 8 bytes" ;; \
-            esac \
-            echo "✅ sizeof 已硬编码为 arm64-v8a LP64 模型" \
-            STUB_EOF \
-                        chmod +x nginx/auto/types/sizeof' scripts/build-android.sh
+          # 在 ./auto/configure 调用前插入 stub（最精准位置，绕过 rollback 和 git clean）
+          sed -i '/^\s*.\\/auto\\/configure \\/i \
+          echo -e "\( {YELLOW}🛠️ Injecting hardcoded sizeof stub for arm64-v8a (LP64)... \){NC}"; \
+          mkdir -p auto/types; \
+          cat > auto/types/sizeof << '"'"'STUB_EOF'"'"' \
+          #!/bin/sh \
+          ngx_type="$1" \
+          case "$ngx_type" in \
+            int|unsigned\\ int)                 echo " 4 bytes" ;; \
+            long|unsigned\\ long|size_t|off_t|time_t|"void *") echo " 8 bytes" ;; \
+            "long long"|"unsigned long long")  echo " 8 bytes" ;; \
+            *)                                 echo " 8 bytes" ;; \
+          esac \
+          echo "✅ sizeof stub applied (arm64-v8a LP64)" \
+          STUB_EOF \
+          chmod +x auto/types/sizeof' scripts/build-nginx.sh
           
-          echo "✅ sizeof 硬编码 stub 已成功注入到构建脚本中（双保险）"
+          echo "✅ sizeof stub 已成功注入到 build-nginx.sh（configure 前执行）"
 
-      - name: 🧪 验证修复效果
+      - name: 🧪 验证注入效果
         run: |
           cd nginx-android
-          echo "=== 剩余补丁（不应有 01/08）==="
+          echo "=== build-nginx.sh 注入验证 ==="
+          grep -A 20 "Injecting hardcoded sizeof stub" scripts/build-nginx.sh || echo "⚠️ 未找到注入代码"
+          echo -e "\n=== 剩余补丁（不应有 01/08）==="
           ls -1 src/nginx_patches/ 2>/dev/null | grep -E '01|08' || echo "✅ 01 和 08 已彻底移除"
-          echo -e "\n=== build-android.sh 是否已注入 stub？==="
-          grep -q "强制注入 arm64-v8a sizeof" scripts/build-android.sh && echo "✅ stub 已注入" || echo "⚠️ 注入失败（请检查）"
 
       - name: 🔨 构建（开启详细日志）
         run: |
           cd nginx-android
           export ANDROID_ABI=arm64-v8a
           export ANDROID_NDK_ROOT=/opt/android-ndk-r29
-          export CFLAGS="${CFLAGS} -DNGX_HAVE_SCHED_SETAFFINITY=0"
+          export CFLAGS="${CFLAGS} -DNGX_HAVE_SCHED_SETAFFINITY=0 -DNGX_HAVE_GNU_CRYPT_R=1"
           set -exo pipefail
           ./scripts/build-android.sh 2>&1 | tee build.log
           echo "✅ 构建完成（日志已保存）"
@@ -107,5 +101,5 @@ jobs:
       - name: 📋 构建摘要（失败时显示关键错误）
         if: failure()
         run: |
-          echo "❌ 构建失败！最后40行关键信息："
-          tail -n 40 nginx-android/build.log | grep -A 20 -E "error|failed|Hunk|sizeof|detect|Exec|bytes" || tail -n 30 nginx-android/build.log
+          echo "❌ 构建失败！最后 50 行关键日志："
+          tail -n 50 nginx-android/build.log | grep -A 30 -E "error|failed|sizeof|Exec|detect|int size|bytes|Injecting" || tail -n 40 nginx-android/build.log
