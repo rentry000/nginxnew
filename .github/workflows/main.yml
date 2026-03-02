@@ -10,18 +10,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: 🌱 检查环境
-        run: |
-          echo "Runner OS: $(lsb_release -d | cut -f2)"
-          echo "GCC Version: $(gcc --version | head -n1)"
-          echo "Clang Version: $(clang --version | head -n1)"
-
-      - name: 🌱 克隆基础仓库
+      - name: 🌱 克隆仓库并检查结构
         run: |
           git clone https://github.com/ryanlee486/nginx-android.git
           cd nginx-android
+          tree -L 2  # 打印目录结构辅助分析
           find . -name "*.sh" -type f -exec chmod +x {} \;
-          echo "✅ 基础仓库克隆及权限修复完成"
+          echo "✅ 仓库克隆及权限修复完成"
 
       - name: 📦 安装依赖
         run: |
@@ -29,7 +24,7 @@ jobs:
           sudo apt-get install -y build-essential libssl-dev zlib1g-dev patch wget unzip tree
           echo "✅ 依赖安装完成"
 
-      - name: 📦 下载并配置 Android NDK r29
+      - name: 📦 配置 Android NDK r29
         run: |
           wget -q https://dl.google.com/android/repository/android-ndk-r29-linux.zip -O ndk.zip
           unzip -q ndk.zip -d /opt
@@ -37,47 +32,55 @@ jobs:
           echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
           echo "✅ NDK r29 配置完成"
 
-      - name: 📥 替换为 Nginx 1.29.5（修复路径）
+      - name: 📥 替换为 Nginx 1.29.5（强制路径）
         run: |
-          # 查找原仓库中的 Nginx 源码目录（假设在 nginx-android/src/nginx）
-          NGINX_SRC_DIR="nginx-android/src/nginx"
-          if [ -d "$NGINX_SRC_DIR" ]; then
-            echo "检测到 Nginx 源码目录: $NGINX_SRC_DIR"
-            rm -rf "$NGINX_SRC_DIR"/*
-          else
-            echo "❌ 未找到默认源码目录，尝试创建"
-            mkdir -p "$NGINX_SRC_DIR"
-          fi
-          
+          # 强制将 Nginx 源码替换到原仓库的 nginx 目录
+          NGINX_SRC_DIR="nginx-android/nginx"
+          rm -rf "$NGINX_SRC_DIR"/*
           wget -q https://github.com/nginx/nginx/releases/download/release-1.29.5/nginx-1.29.5.zip -O nginx.zip
           unzip -q nginx.zip
           mv nginx-1.29.5/* "$NGINX_SRC_DIR/"
           rm -rf nginx-1.29.5 nginx.zip
-          echo "✅ 已替换为 Nginx 1.29.5"
+          echo "✅ 已替换为 Nginx 1.29.5 到 $NGINX_SRC_DIR"
 
-      - name: 🛠️ 彻底清除所有补丁（关键修复）
+      - name: 🛠️ 强制删除所有补丁文件（终极方案）
         run: |
           cd nginx-android
-          # 删除所有 .patch 文件（包括子目录）
+          # 递归删除所有 .patch 文件（包括子目录）
           find . -name "*.patch" -exec rm -f {} \;
           echo "✅ 已删除所有补丁文件"
 
-      - name: 🛠️ 禁用构建脚本的补丁逻辑
+      - name: 🛠️ 彻底修改构建脚本（禁用补丁逻辑）
         run: |
           cd nginx-android
           if [ -f "scripts/build-android.sh" ]; then
-            # 注释掉补丁应用代码块
-            sed -i '/for patch in patches\/\*.patch/,/done/ s/^/#/' scripts/build-android.sh
-            echo "✅ 已禁用补丁应用逻辑"
+            # 1. 删除所有补丁相关函数
+            sed -i '/apply_patch/d' scripts/build-android.sh
+            
+            # 2. 删除补丁循环（匹配所有可能模式）
+            sed -i '/for.*patch.*in.*patches\/\*.patch/,/done/d' scripts/build-android.sh
+            
+            # 3. 删除补丁相关变量
+            sed -i '/PATCH_DIR/d' scripts/build-android.sh
+            
+            # 4. 删除补丁验证逻辑
+            sed -i '/patch --dry-run/d' scripts/build-android.sh
+            
+            # 5. 替换旧版本号
+            sed -i 's/nginx-[0-9.]*\.zip/nginx-1.29.5.zip/' scripts/build-android.sh
+            echo "✅ 构建脚本已彻底移除补丁逻辑"
+          else
+            echo "❌ 未找到构建脚本，构建无法继续"
+            exit 1
           fi
 
-      - name: 🧐 调试补丁路径（验证修复）
+      - name: 🧐 最终验证补丁状态
         run: |
           cd nginx-android
           echo "=== 当前目录下的补丁文件 ==="
           find . -name "*.patch"
           echo "=== 构建脚本中与补丁相关的代码 ==="
-          grep -A 10 "patch" scripts/build-android.sh
+          grep -i "patch" scripts/build-android.sh
 
       - name: 🔨 构建 Nginx 1.29.5 for arm64-v8a
         run: |
