@@ -48,15 +48,15 @@ jobs:
 
           # 所有 stubs
           cat > auto/types/sizeof << 'EOF'
-#!/bin/sh
-case "$1" in
-  int|unsigned\ int) echo " 4 bytes" ;;
-  long|unsigned\ long) echo " 8 bytes" ;;
-  size_t|off_t|time_t|"void *") echo " 8 bytes" ;;
-  "long long"|"unsigned long long") echo " 8 bytes" ;;
-  *) echo " 8 bytes" ;;
-esac
-EOF
+          #!/bin/sh
+          case "$1" in
+            int|unsigned\ int) echo " 4 bytes" ;;
+            long|unsigned\ long) echo " 8 bytes" ;;
+            size_t|off_t|time_t|"void *") echo " 8 bytes" ;;
+            "long long"|"unsigned long long") echo " 8 bytes" ;;
+            *) echo " 8 bytes" ;;
+          esac
+          EOF
           chmod +x auto/types/sizeof
           echo " 8 bytes" > auto/types/uintptr
           echo " 8 bytes" > auto/types/uintptr_t
