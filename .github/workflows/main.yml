@@ -7,10 +7,6 @@ on:
         description: 'PHP Version (支持 8.1 \~ 8.5)'
         required: true
         default: '8.5'
-      build_target:
-        description: '构建目标 (当前仅支持 linux-aarch64)'
-        required: true
-        default: 'linux-aarch64'
   push:
     branches: [ main ]
     paths:
@@ -74,21 +70,19 @@ jobs:
 
       - name: Check environment with spc doctor
         run: |
-          ./spc doctor || true   # 允许警告/非致命退出，继续
+          ./spc doctor || true
 
-      - name: Safe clean old caches (avoid spc dangerous rm)
+      - name: Safe clean old caches (prevent spc dangerous rm)
         run: |
           rm -rf source downloads buildroot || true
-          # 如果 spc 有 clean 命令，可用 ./spc clean || true
 
-      - name: Download sources and libs (no --clean to avoid dangerous rm)
+      - name: Download sources and libs
         run: |
-          ./spc download all --with-php=${{ github.event.inputs.php_version || '8.5' }} || true
-          # 如果失败，再加 --clean 重试（但会触发 rm），这里先不加
+          ./spc download all --with-php=${{ github.event.inputs.php_version || '8.5' }}
 
       - name: Build static PHP
         run: |
-          ./spc craft --config craft.yml --arch aarch64 --debug
+          ./spc craft --debug   # 自动读取 ./craft.yml，无需 --config 或 --arch
 
       - name: Prepare artifacts
         run: |
