@@ -1,50 +1,36 @@
-name: Build Static PHP 8.5 (aarch64) with Maximum Extensions
+name: Build Static PHP 8.5 (linux-aarch64) with Maximum Extensions
 
 on:
   workflow_dispatch:
     inputs:
       php_version:
-        description: 'PHP Version (8.1 \~ 8.5)'
+        description: 'PHP Version (支持 8.1 \~ 8.5)'
         required: true
         default: '8.5'
       build_target:
-        description: 'Build target (linux-x86_64, linux-aarch64, macos-x86_64, macos-aarch64)'
+        description: '构建目标 (当前仅支持 linux-aarch64)'
         required: true
         default: 'linux-aarch64'
   push:
     branches: [ main ]
     paths:
-      - 'craft.yml'
+      - 'craft.yml'  # 当 craft.yml 变更时自动触发
 
 jobs:
   build:
-    runs-on: ubuntu-latest  # 支持 linux-aarch64 构建（ubuntu-latest 是 x86_64，但 spc 可以 cross-compile）
+    runs-on: ubuntu-24.04-arm  # 原生 arm64 runner，能直接执行 spc-linux-aarch64
 
     steps:
-      - name: Checkout your repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ... 其他不变
+      - name: Download prebuilt spc binary (nightly, aarch64)
+        run: |
+          curl -fsSL -o spc https://dl.static-php.dev/static-php-cli/spc-bin/nightly/spc-linux-aarch64
+          chmod +x spc
+          ./spc --version  # 验证下载成功
 
-        - name: Download prebuilt spc binary (nightly)
-          run: |
-            TARGET="${{ github.event.inputs.build_target || 'linux-x86_64' }}"   # 改默认这里
-            if [[ "$TARGET" == macos* ]]; then
-              echo "macOS builds require macos-latest runner. Change runs-on if needed."
-              exit 1
-            fi
-        
-            if [[ "$TARGET" == *aarch64 ]]; then
-              ARCH="aarch64"
-            else
-              ARCH="x86_64"
-            fi
-        
-            curl -fsSL -o spc https://dl.static-php.dev/static-php-cli/spc-bin/nightly/spc-linux-${ARCH}
-            chmod +x spc
-            ./spc --version
-
-      - name: Install build prerequisites (Linux aarch64 compatible)
+      - name: Install build prerequisites (for arm64 Ubuntu)
         run: |
           sudo apt-get update -y
           sudo apt-get install -y \
@@ -58,7 +44,7 @@ jobs:
             libmagickwand-dev libpq-dev unixodbc-dev libodbc1 \
             libsodium-dev libbrotli-dev liblz4-dev librdkafka-dev
 
-      - name: Create craft.yml with maximum reasonable extensions (for Linux)
+      - name: Create craft.yml (最大化支持的扩展列表)
         run: |
           cat > craft.yml << 'EOF'
           php-version: "${{ github.event.inputs.php_version || '8.5' }}"
@@ -83,24 +69,24 @@ jobs:
 
           build-options:
             strip: true
-            # upx: true  # 可选：进一步压缩，但 aarch64 上兼容性需测试
+            # upx: true   # 可选开启，进一步压缩体积（arm64 兼容性好，但首次建议关闭）
           EOF
 
-      - name: Build static PHP
+      - name: Check environment and build static PHP
         run: |
           ./spc doctor --no-check-download
           ./spc download all --clean --with-php=${{ github.event.inputs.php_version || '8.5' }}
-          ./spc craft --config craft.yml --arch \( (echo " \){{ github.event.inputs.build_target || 'linux-aarch64' }}" | cut -d- -f2)
+          ./spc craft --config craft.yml --arch aarch64   # 明确指定 aarch64
 
       - name: Prepare artifacts
         run: |
           mkdir -p artifacts
           cp dist/* artifacts/ 2>/dev/null || true
-          ls -lh artifacts/
+          ls -lh artifacts/ || echo "No files found in dist/"
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: static-php-\( {{ github.event.inputs.php_version || '8.5' }}- \){{ github.event.inputs.build_target || 'linux-aarch64' }}
+          name: static-php-${{ github.event.inputs.php_version || '8.5' }}-linux-aarch64
           path: artifacts/
           retention-days: 7
