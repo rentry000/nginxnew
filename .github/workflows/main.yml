@@ -43,20 +43,25 @@ jobs:
 
           git clone https://github.com/leev/ngx_http_geoip2_module.git
 
-          tree -L 2 nginx-1.28.2 || ls -laR nginx-1.28.2
+          echo "源码目录结构检查："
+          ls -la nginx-1.28.2/ | grep configure
+          ls -la nginx-1.28.2/auto/ 2>/dev/null || echo "auto/ 存在但 configure 在根目录"
 
-      - name: 🩹 权限修复 + stubs 注入
+      - name: 🩹 stubs 注入 + 权限修复（configure 在根目录）
         run: |
           cd nginx-1.28.2
 
-          if [ ! -f auto/configure ]; then
-            echo "ERROR: auto/configure not found!"
+          if [ ! -f configure ]; then
+            echo "ERROR: configure 文件在根目录下仍然不存在！"
+            ls -la .
             exit 1
           fi
 
-          chmod +x auto/configure
-          ls -l auto/configure
+          chmod +x configure
+          ls -l configure
 
+          # 注入 stubs（针对 auto/types/ 下的检测脚本）
+          mkdir -p auto/types
           cat > auto/types/sizeof << 'EOF'
           #!/bin/sh
           case "$1" in
@@ -87,7 +92,7 @@ jobs:
           export CFLAGS="-Os -fPIC -fPIE -DNGX_HAVE_SCHED_SETAFFINITY=0"
           export LDFLAGS="-static -pie -Wl,--gc-sections -Wl,--strip-all -fuse-ld=lld"
 
-          ./auto/configure \
+          ./configure \
             --prefix=/data/local/tmp/nginx \
             --with-cc="$CC" \
             --with-cc-opt="$CFLAGS" \
@@ -141,7 +146,7 @@ jobs:
 
           ls -l Makefile objs/nginx objs/*.so 2>/dev/null || echo "关键文件缺失"
 
-      - name: 🔨 Make + 提取所有产物
+      - name: 🔨 Make + 提取产物
         run: |
           cd nginx-1.28.2
           make -j$(nproc) || exit 1
@@ -152,7 +157,7 @@ jobs:
           file ../build/install/arm64-v8a/sbin/nginx
           ls -lh ../build/install/arm64-v8a/modules/ ../build/install/arm64-v8a/sbin/nginx
 
-      - name: 📤 上传所有文件
+      - name: 📤 上传产物
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -163,10 +168,8 @@ jobs:
             make.log
             nginx-1.28.2/objs/config.log
 
-      - name: 📋 最终诊断
+      - name: 📋 诊断
         if: always()
         run: |
-          echo "configure.log 最后 100 行:"
-          tail -n 100 configure.log 2>/dev/null || echo "无日志"
-          echo "make.log 最后 50 行:"
+          tail -n 100 configure.log 2>/dev/null || echo "无 configure 日志"
           tail -n 50 make.log 2>/dev/null || echo "无 make 日志"
