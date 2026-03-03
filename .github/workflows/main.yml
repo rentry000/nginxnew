@@ -1,10 +1,10 @@
-name: Build Static PHP 8.5 RC1 (with custom source tar.gz)
+name: Build Static PHP 8.5 RC1 (manual clone bypass)
 
 on:
   workflow_dispatch:
     inputs:
       php_version:
-        description: 'PHP Version (use 8.5 for RC1)'
+        description: 'PHP Version'
         required: true
         default: '8.5'
   push:
@@ -30,13 +30,13 @@ jobs:
         run: |
           sudo apt-get update -y
           sudo apt-get install -y \
-            binutils bison flex libtool autoconf automake make patch pkg-config \
+            binutils bison flex libtool autoconf automake make patch pkg-config git \
             libxml2-dev libsqlite3-dev zlib1g-dev libcurl4-openssl-dev libssl-dev \
             libbz2-dev libjpeg-dev libpng-dev libfreetype6-dev libonig-dev libzip-dev \
             libreadline-dev libgmp-dev libicu-dev \
-            libsodium-dev libbrotli-dev re2c autopoint gettext git
+            libsodium-dev libbrotli-dev re2c autopoint gettext
 
-      - name: Create craft.yml (official example config)
+      - name: Create craft.yml (official example)
         run: |
           cat > craft.yml << 'EOF'
           php-version: "${{ github.event.inputs.php_version || '8.5' }}"
@@ -56,16 +56,23 @@ jobs:
         run: |
           ./spc doctor || true
 
-      - name: Safe clean caches
+      - name: Safe clean caches (except php-src)
         run: |
-          rm -rf source downloads buildroot || true
+          rm -rf downloads buildroot || true
 
-      - name: Download sources with custom PHP tar.gz
+      - name: Manually clone PHP 8.5.4RC1 source
         run: |
-          ./spc download all \
-            --with-php=${{ github.event.inputs.php_version || '8.5' }} \
-            -U "php-src:https://downloads.php.net/\~daniels/php-8.5.4RC1.tar.gz" \
-            --debug
+          mkdir -p source/php-src
+          cd source/php-src
+          git init
+          git remote add origin https://github.com/php/php-src.git
+          git fetch --depth 1 origin tag php-8.5.4RC1
+          git checkout FETCH_HEAD
+          cd ../../
+
+      - name: Download other sources (skip php-src)
+        run: |
+          ./spc download all --with-php=8.5 --ignore-cache-sources=php-src --debug
 
       - name: Build static PHP
         run: |
