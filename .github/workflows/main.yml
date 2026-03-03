@@ -38,7 +38,7 @@ jobs:
       - name: Create craft.yml (官方示例配置)
         run: |
           cat > craft.yml << 'EOF'
-          php-version: "8.5.2"
+          php-version: "8.5.2.tar.gz"
 
           extensions: "apcu,bcmath,calendar,ctype,curl,dba,dom,exif,fileinfo,filter,gd,iconv,mbregex,mbstring,mysqli,mysqlnd,opcache,openssl,pcntl,pdo,pdo_mysql,pdo_sqlite,phar,posix,readline,redis,session,simplexml,sockets,sodium,sqlite3,tokenizer,xml,xmlreader,xmlwriter,xsl,zip,zlib"
 
@@ -76,7 +76,7 @@ jobs:
 
       - name: Download 其他依赖库（php-src 已存在，跳过查询）
         run: |
-          ./spc download all --with-php=8.5.2 --ignore-cache-sources=php-src --debug
+          ./spc download all --with-php=8.5.2.tar.gz --ignore-cache-sources=php-src --debug
 
       - name: Build static PHP
         run: |
