@@ -1,4 +1,4 @@
-name: Build Static PHP 8.5.2 (使用完整版本号 + 官方直链)
+name: Build Static PHP 8.5.2 (GitHub Mirror 稳定版)
 
 on:
   workflow_dispatch:
@@ -20,7 +20,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download prebuilt spc binary (nightly aarch64)
+      - name: Download prebuilt spc binary
         run: |
           curl -fsSL -o spc https://dl.static-php.dev/static-php-cli/spc-bin/nightly/spc-linux-aarch64
           chmod +x spc
@@ -35,7 +35,7 @@ jobs:
             libbz2-dev libjpeg-dev libpng-dev libfreetype6-dev libonig-dev libzip-dev \
             libreadline-dev libgmp-dev libicu-dev libsodium-dev libbrotli-dev re2c autopoint gettext
 
-      - name: Create craft.yml（使用官方示例 + 完整版本号 8.5.2）
+      - name: Create craft.yml (官方示例配置)
         run: |
           cat > craft.yml << 'EOF'
           php-version: "8.5.2"
@@ -59,17 +59,22 @@ jobs:
         run: |
           rm -rf downloads buildroot || true
 
-      - name: 手动下载 + 解压官方 PHP 8.5.2（彻底绕过 503）
+      - name: 下载 PHP 源码（GitHub Mirror - 最稳定）
         run: |
           mkdir -p source/php-src downloads
-          echo "下载官方 PHP 8.5.2 tar.gz..."
-          curl -L -o downloads/php-8.5.2.tar.gz https://www.php.net/distributions/php-8.5.2.tar.gz
-          echo "解压到 spc 期望路径..."
+          echo "从 GitHub 下载 PHP 8.5.2 源码（约 25MB）..."
+          curl -L -f --retry 5 -o downloads/php-8.5.2.tar.gz \
+            https://github.com/php/php-src/archive/refs/tags/php-8.5.2.tar.gz
+          
+          echo "下载完成，文件大小："
+          ls -lh downloads/php-8.5.2.tar.gz
+          
+          echo "解压源码..."
           tar -xzf downloads/php-8.5.2.tar.gz -C source/php-src --strip-components=1
-          echo "PHP 源码准备完成"
-          ls -lh source/php-src | head -n 5
+          echo "PHP 源码解压成功！"
+          ls -lh source/php-src | head -n 6
 
-      - name: Download 其他依赖（php-src 已存在，跳过查询）
+      - name: Download 其他依赖库（php-src 已存在，跳过查询）
         run: |
           ./spc download all --with-php=8.5.2 --ignore-cache-sources=php-src --debug
 
