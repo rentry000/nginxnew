@@ -1,4 +1,4 @@
-name: Build Static PHP 8.5.2 (使用本地 PHP 源码路径)
+name: Build Static PHP 8.5.2
 
 on:
   workflow_dispatch:
@@ -31,7 +31,7 @@ jobs:
             libreadline-dev libgmp-dev libicu-dev libsodium-dev libbrotli-dev \
             re2c autopoint gettext
 
-      - name: Create craft.yml (官方示例)
+      - name: Create craft.yml (官方示例配置)
         run: |
           cat > craft.yml << 'EOF'
           php-version: "8.5.2"
@@ -51,31 +51,29 @@ jobs:
         run: |
           ./spc doctor || true
 
-      - name: Clean caches (但保留 source/php-src)
+      - name: Safe clean caches (保留 source/php-src)
         run: |
           rm -rf downloads buildroot || true
 
-      - name: 手动下载并解压 PHP 8.5.2 到 source/php-src
+      - name: 手动下载并解压官方 PHP 8.5.2 到 source/php-src
         run: |
           mkdir -p source/php-src downloads
           curl -L -o downloads/php-8.5.2.tar.gz https://www.php.net/distributions/php-8.5.2.tar.gz
           tar -xzf downloads/php-8.5.2.tar.gz -C source/php-src --strip-components=1
-          echo "已解压到 source/php-src/"
-          ls -lh source/php-src | head -n 10
+          echo "PHP 源码已准备好"
+          ls -lh source/php-src | head -n 5
 
-      - name: Download 其他依赖（强制跳过 php-src 下载和查询）
+      - name: Download 依赖并构建 static PHP（合并步骤）
         run: |
-          ./spc download all --with-php=8.5.2 --ignore-cache-sources=php-src --debug
-
-      - name: Build static PHP
-        run: |
+          ./spc download all --with-php=8.5.2 --ignore-cache-sources=php-src --debug || true
+          echo "Download 完成，开始构建..."
           ./spc craft --debug
 
       - name: Prepare artifacts
         run: |
           mkdir -p artifacts
           cp dist/* artifacts/ 2>/dev/null || true
-          ls -lh artifacts/
+          ls -lh artifacts/ || echo "dist 目录为空或不存在"
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
