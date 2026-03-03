@@ -1,12 +1,12 @@
-name: Build Static PHP (official example + fallback)
+name: Build Static PHP 8.5 RC1 (with custom source tar.gz)
 
 on:
   workflow_dispatch:
     inputs:
       php_version:
-        description: 'PHP Version (8.1 \~ 8.5)'
+        description: 'PHP Version (use 8.5 for RC1)'
         required: true
-        default: '8.5'  # 改成 8.5 优先
+        default: '8.5'
   push:
     branches: [ main ]
     paths:
@@ -34,9 +34,9 @@ jobs:
             libxml2-dev libsqlite3-dev zlib1g-dev libcurl4-openssl-dev libssl-dev \
             libbz2-dev libjpeg-dev libpng-dev libfreetype6-dev libonig-dev libzip-dev \
             libreadline-dev libgmp-dev libicu-dev \
-            libsodium-dev libbrotli-dev re2c autopoint gettext git  # 加 git 支持 shallow-clone
+            libsodium-dev libbrotli-dev re2c autopoint gettext git
 
-      - name: Create craft.yml (official example)
+      - name: Create craft.yml (official example config)
         run: |
           cat > craft.yml << 'EOF'
           php-version: "${{ github.event.inputs.php_version || '8.5' }}"
@@ -60,9 +60,12 @@ jobs:
         run: |
           rm -rf source downloads buildroot || true
 
-      - name: Download sources (with fallback shallow-clone)
+      - name: Download sources with custom PHP tar.gz
         run: |
-          ./spc download all --with-php=${{ github.event.inputs.php_version || '8.5' }} --shallow-clone --debug || true
+          ./spc download all \
+            --with-php=${{ github.event.inputs.php_version || '8.5' }} \
+            -U "php-src:https://downloads.php.net/\~daniels/php-8.5.4RC1.tar.gz" \
+            --debug
 
       - name: Build static PHP
         run: |
@@ -77,6 +80,6 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: static-php-${{ github.event.inputs.php_version || '8.5' }}-aarch64
+          name: static-php-8.5.4RC1-aarch64
           path: artifacts/
           retention-days: 7
