@@ -1,4 +1,4 @@
-name: Build Static PHP 8.5.4RC1 (使用你指定的官方 RC1 地址)
+name: Build Static PHP 8.5.2 (使用完整版本号 + 官方直链)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
       php_version:
         description: 'PHP Version'
         required: true
-        default: '8.5'
+        default: '8.5.2'
   push:
     branches: [ main ]
     paths:
@@ -35,10 +35,10 @@ jobs:
             libbz2-dev libjpeg-dev libpng-dev libfreetype6-dev libonig-dev libzip-dev \
             libreadline-dev libgmp-dev libicu-dev libsodium-dev libbrotli-dev re2c autopoint gettext
 
-      - name: Create craft.yml (官方示例配置)
+      - name: Create craft.yml（使用官方示例 + 完整版本号 8.5.2）
         run: |
           cat > craft.yml << 'EOF'
-          php-version: "${{ github.event.inputs.php_version || '8.5' }}"
+          php-version: "8.5.2"
 
           extensions: "apcu,bcmath,calendar,ctype,curl,dba,dom,exif,fileinfo,filter,gd,iconv,mbregex,mbstring,mysqli,mysqlnd,opcache,openssl,pcntl,pdo,pdo_mysql,pdo_sqlite,phar,posix,readline,redis,session,simplexml,sockets,sodium,sqlite3,tokenizer,xml,xmlreader,xmlwriter,xsl,zip,zlib"
 
@@ -59,27 +59,19 @@ jobs:
         run: |
           rm -rf downloads buildroot || true
 
-      - name: 下载你指定的 PHP 8.5.4RC1 源码（官方 RC1 地址）
+      - name: 手动下载 + 解压官方 PHP 8.5.2（彻底绕过 503）
         run: |
           mkdir -p source/php-src downloads
-          echo "正在下载 https://downloads.php.net/\~daniels/php-8.5.4RC1.tar.gz ..."
-          curl -L -o downloads/php-8.5.4RC1.tar.gz https://downloads.php.net/\~daniels/php-8.5.4RC1.tar.gz
-          
-          # 关键检查：确保下载的是真实 tar.gz（>20MB）
-          FILE_SIZE=$(stat -c %s downloads/php-8.5.4RC1.tar.gz)
-          echo "下载文件大小: $((FILE_SIZE/1024/1024)) MB"
-          if [ "$FILE_SIZE" -lt 20000000 ]; then
-            echo "❌ 下载的文件太小（可能是错误页），请稍后重试"
-            exit 1
-          fi
-          
-          echo "解压到 source/php-src/ ..."
-          tar -xzf downloads/php-8.5.4RC1.tar.gz -C source/php-src --strip-components=1
-          echo "✅ PHP 源码准备完成！"
+          echo "下载官方 PHP 8.5.2 tar.gz..."
+          curl -L -o downloads/php-8.5.2.tar.gz https://www.php.net/distributions/php-8.5.2.tar.gz
+          echo "解压到 spc 期望路径..."
+          tar -xzf downloads/php-8.5.2.tar.gz -C source/php-src --strip-components=1
+          echo "PHP 源码准备完成"
+          ls -lh source/php-src | head -n 5
 
-      - name: Download 其他库（php-src 已存在，跳过查询）
+      - name: Download 其他依赖（php-src 已存在，跳过查询）
         run: |
-          ./spc download all --with-php=8.5 --ignore-cache-sources=php-src --debug
+          ./spc download all --with-php=8.5.2 --ignore-cache-sources=php-src --debug
 
       - name: Build static PHP
         run: |
@@ -94,6 +86,6 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: static-php-8.5.4RC1-linux-aarch64
+          name: static-php-8.5.2-linux-aarch64
           path: artifacts/
           retention-days: 7
