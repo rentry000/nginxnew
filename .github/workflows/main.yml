@@ -14,11 +14,11 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'craft.yml'  # 当 craft.yml 变更时自动触发
+      - 'craft.yml'
 
 jobs:
   build:
-    runs-on: ubuntu-24.04-arm  # 原生 arm64 runner，能直接执行 spc-linux-aarch64
+    runs-on: ubuntu-24.04-arm
 
     steps:
       - name: Checkout repository
@@ -28,7 +28,7 @@ jobs:
         run: |
           curl -fsSL -o spc https://dl.static-php.dev/static-php-cli/spc-bin/nightly/spc-linux-aarch64
           chmod +x spc
-          ./spc --version  # 验证下载成功
+          ./spc --version
 
       - name: Install build prerequisites (for arm64 Ubuntu)
         run: |
@@ -41,7 +41,7 @@ jobs:
             libyaml-dev libsnappy-dev libzstd-dev libevent-dev libenchant-2-dev \
             libtidy-dev libpcre2-dev libmemcached-dev libssh2-1-dev \
             libmaxminddb-dev libprotobuf-dev protobuf-compiler \
-            libmagickwand-dev libpq-dev unixodbc-dev libodbc1 \
+            libmagickwand-dev libpq-dev unixodbc-dev libodbc2 \
             libsodium-dev libbrotli-dev liblz4-dev librdkafka-dev
 
       - name: Create craft.yml (最大化支持的扩展列表)
@@ -69,14 +69,14 @@ jobs:
 
           build-options:
             strip: true
-            # upx: true   # 可选开启，进一步压缩体积（arm64 兼容性好，但首次建议关闭）
+            # upx: true
           EOF
 
       - name: Check environment and build static PHP
         run: |
           ./spc doctor --no-check-download
           ./spc download all --clean --with-php=${{ github.event.inputs.php_version || '8.5' }}
-          ./spc craft --config craft.yml --arch aarch64   # 明确指定 aarch64
+          ./spc craft --config craft.yml --arch aarch64
 
       - name: Prepare artifacts
         run: |
