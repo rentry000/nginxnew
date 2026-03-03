@@ -1,4 +1,4 @@
-name: Build Static PHP 8.5 RC1 (manual clone bypass)
+name: Build Static PHP 8.5.4RC1 (use your exact tar.gz)
 
 on:
   workflow_dispatch:
@@ -20,23 +20,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download prebuilt spc binary (nightly, aarch64)
+      - name: Download prebuilt spc binary (nightly aarch64)
         run: |
           curl -fsSL -o spc https://dl.static-php.dev/static-php-cli/spc-bin/nightly/spc-linux-aarch64
           chmod +x spc
           ./spc --version
 
-      - name: Install build prerequisites
+      - name: Install system dependencies
         run: |
           sudo apt-get update -y
           sudo apt-get install -y \
             binutils bison flex libtool autoconf automake make patch pkg-config git \
             libxml2-dev libsqlite3-dev zlib1g-dev libcurl4-openssl-dev libssl-dev \
             libbz2-dev libjpeg-dev libpng-dev libfreetype6-dev libonig-dev libzip-dev \
-            libreadline-dev libgmp-dev libicu-dev \
-            libsodium-dev libbrotli-dev re2c autopoint gettext
+            libreadline-dev libgmp-dev libicu-dev libsodium-dev libbrotli-dev re2c autopoint gettext
 
-      - name: Create craft.yml (official example)
+      - name: Create craft.yml（官方示例配置）
         run: |
           cat > craft.yml << 'EOF'
           php-version: "${{ github.event.inputs.php_version || '8.5' }}"
@@ -56,21 +55,20 @@ jobs:
         run: |
           ./spc doctor || true
 
-      - name: Safe clean caches (except php-src)
+      - name: Safe clean old caches
         run: |
           rm -rf downloads buildroot || true
 
-      - name: Manually clone PHP 8.5.4RC1 source
+      - name: 🔥 Manually download YOUR tar.gz and extract
         run: |
-          mkdir -p source/php-src
-          cd source/php-src
-          git init
-          git remote add origin https://github.com/php/php-src.git
-          git fetch --depth 1 origin tag php-8.5.4RC1
-          git checkout FETCH_HEAD
-          cd ../../
+          echo "=== 下载你指定的 PHP 8.5.4RC1 ==="
+          mkdir -p source
+          curl -L -# -o php-src.tar.gz https://downloads.php.net/\~daniels/php-8.5.4RC1.tar.gz
+          tar -xzf php-src.tar.gz -C source/ --strip-components=1
+          echo "提取完成！"
+          ls -la source/ | head -10
 
-      - name: Download other sources (skip php-src)
+      - name: Download other libraries (skip php-src query)
         run: |
           ./spc download all --with-php=8.5 --ignore-cache-sources=php-src --debug
 
@@ -82,11 +80,11 @@ jobs:
         run: |
           mkdir -p artifacts
           cp dist/* artifacts/ 2>/dev/null || true
-          ls -lh artifacts/
+          ls -lh artifacts/ || echo "No files found"
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: static-php-8.5.4RC1-aarch64
+          name: static-php-8.5.4RC1-linux-aarch64
           path: artifacts/
           retention-days: 7
