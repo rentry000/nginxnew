@@ -1,4 +1,4 @@
-name: Build Static PHP 8.5.2
+name: Build Static PHP 8.5.3
 
 on:
   workflow_dispatch:
@@ -34,7 +34,7 @@ jobs:
       - name: Create craft.yml (官方示例配置)
         run: |
           cat > craft.yml << 'EOF'
-          php-version: "8.5.2"
+          php-version: "8.5.3"
 
           extensions: "apcu,bcmath,calendar,ctype,curl,dba,dom,exif,fileinfo,filter,gd,iconv,mbregex,mbstring,mysqli,mysqlnd,opcache,openssl,pcntl,pdo,pdo_mysql,pdo_sqlite,phar,posix,readline,redis,session,simplexml,sockets,sodium,sqlite3,tokenizer,xml,xmlreader,xmlwriter,xsl,zip,zlib"
 
@@ -51,21 +51,25 @@ jobs:
         run: |
           ./spc doctor || true
 
-      - name: Safe clean caches (保留 source/php-src)
+      - name: Safe clean caches
         run: |
           rm -rf downloads buildroot || true
 
-      - name: 手动下载并解压官方 PHP 8.5.2 到 source/php-src
+      - name: 手动下载并解压官方 PHP 8.5.3 到 source/php-src
         run: |
           mkdir -p source/php-src downloads
-          curl -L -o downloads/php-8.5.2.tar.gz https://www.php.net/distributions/php-8.5.2.tar.gz
-          tar -xzf downloads/php-8.5.2.tar.gz -C source/php-src --strip-components=1
+          echo "下载官方 PHP 8.5.3 tar.gz..."
+          curl -L -o downloads/php-8.5.3.tar.gz https://www.php.net/distributions/php-8.5.3.tar.gz
+          echo "检查下载文件大小（应 \~23MB）："
+          ls -lh downloads/php-8.5.3.tar.gz
+          echo "解压到 source/php-src/ ..."
+          tar -xzf downloads/php-8.5.3.tar.gz -C source/php-src --strip-components=1
           echo "PHP 源码已准备好"
           ls -lh source/php-src | head -n 5
 
-      - name: Download 依赖并构建 static PHP（合并步骤）
+      - name: Download 依赖并构建 static PHP
         run: |
-          ./spc download all --with-php=8.5.2 --ignore-cache-sources=php-src --debug || true
+          ./spc download all --with-php=8.5.3 --ignore-cache-sources=php-src --debug || true
           echo "Download 完成，开始构建..."
           ./spc craft --debug
 
@@ -78,6 +82,6 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: static-php-8.5.2-linux-aarch64
+          name: static-php-8.5.3-linux-aarch64
           path: artifacts/
           retention-days: 7
