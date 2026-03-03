@@ -1,12 +1,7 @@
-name: Build Static PHP 8.5.2 (GitHub Mirror 稳定版)
+name: Build Static PHP 8.5.2 (使用本地 PHP 源码路径)
 
 on:
   workflow_dispatch:
-    inputs:
-      php_version:
-        description: 'PHP Version'
-        required: true
-        default: '8.5.2'
   push:
     branches: [ main ]
     paths:
@@ -20,7 +15,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download prebuilt spc binary
+      - name: Download prebuilt spc binary (nightly aarch64)
         run: |
           curl -fsSL -o spc https://dl.static-php.dev/static-php-cli/spc-bin/nightly/spc-linux-aarch64
           chmod +x spc
@@ -33,9 +28,10 @@ jobs:
             binutils bison flex libtool autoconf automake make patch pkg-config git \
             libxml2-dev libsqlite3-dev zlib1g-dev libcurl4-openssl-dev libssl-dev \
             libbz2-dev libjpeg-dev libpng-dev libfreetype6-dev libonig-dev libzip-dev \
-            libreadline-dev libgmp-dev libicu-dev libsodium-dev libbrotli-dev re2c autopoint gettext
+            libreadline-dev libgmp-dev libicu-dev libsodium-dev libbrotli-dev \
+            re2c autopoint gettext
 
-      - name: Create craft.yml (官方示例配置)
+      - name: Create craft.yml (官方示例)
         run: |
           cat > craft.yml << 'EOF'
           php-version: "8.5.2"
@@ -55,28 +51,21 @@ jobs:
         run: |
           ./spc doctor || true
 
-      - name: Safe clean caches
+      - name: Clean caches (但保留 source/php-src)
         run: |
           rm -rf downloads buildroot || true
 
-      - name: 下载 PHP 源码（GitHub Mirror - 最稳定）
+      - name: 手动下载并解压 PHP 8.5.2 到 source/php-src
         run: |
           mkdir -p source/php-src downloads
-          echo "从 GitHub 下载 PHP 8.5.2 源码（约 25MB）..."
-          curl -L -f --retry 5 -o downloads/php-8.5.2.tar.gz \
-            https://github.com/php/php-src/archive/refs/tags/php-8.5.2.tar.gz
-          
-          echo "下载完成，文件大小："
-          ls -lh downloads/php-8.5.2.tar.gz
-          
-          echo "解压源码..."
+          curl -L -o downloads/php-8.5.2.tar.gz https://www.php.net/distributions/php-8.5.2.tar.gz
           tar -xzf downloads/php-8.5.2.tar.gz -C source/php-src --strip-components=1
-          echo "PHP 源码解压成功！"
-          ls -lh source/php-src | head -n 6
+          echo "已解压到 source/php-src/"
+          ls -lh source/php-src | head -n 10
 
-      - name: Download 其他依赖库（php-src 已存在，跳过查询）
+      - name: Download 其他依赖（强制跳过 php-src 下载和查询）
         run: |
-          ./spc download all --with-php=8.5.2 --debug
+          ./spc download all --with-php=8.5.2 --ignore-cache-sources=php-src --debug
 
       - name: Build static PHP
         run: |
