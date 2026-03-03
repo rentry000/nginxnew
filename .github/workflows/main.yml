@@ -24,23 +24,25 @@ jobs:
       - name: Checkout your repository
         uses: actions/checkout@v4
 
-      - name: Download prebuilt spc binary (nightly)
-        run: |
-          TARGET="${{ github.event.inputs.build_target || 'linux-aarch64' }}"
-          if [[ "$TARGET" == macos* ]]; then
-            echo "macOS builds require macos-latest runner. Change runs-on if needed."
-            exit 1
-          fi
-          
-          if [[ "$TARGET" == *aarch64 ]]; then
-            ARCH="aarch64"
-          else
-            ARCH="x86_64"
-          fi
-          
-          curl -fsSL -o spc https://dl.static-php.dev/static-php-cli/spc-bin/nightly/spc-linux-${ARCH}
-          chmod +x spc
-          ./spc --version
+      # ... 其他不变
+
+        - name: Download prebuilt spc binary (nightly)
+          run: |
+            TARGET="${{ github.event.inputs.build_target || 'linux-x86_64' }}"   # 改默认这里
+            if [[ "$TARGET" == macos* ]]; then
+              echo "macOS builds require macos-latest runner. Change runs-on if needed."
+              exit 1
+            fi
+        
+            if [[ "$TARGET" == *aarch64 ]]; then
+              ARCH="aarch64"
+            else
+              ARCH="x86_64"
+            fi
+        
+            curl -fsSL -o spc https://dl.static-php.dev/static-php-cli/spc-bin/nightly/spc-linux-${ARCH}
+            chmod +x spc
+            ./spc --version
 
       - name: Install build prerequisites (Linux aarch64 compatible)
         run: |
