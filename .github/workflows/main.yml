@@ -1,4 +1,4 @@
-name: Build Latest Nginx Static Binary + Dynamic Modules for Android arm64-v8a (NDK r29 - Full + geoip2 + perl)
+name: Build Latest Nginx Static Binary + All Modules (including geoip2 & perl dynamic) for Android arm64-v8a (NDK r29)
 
 on:
   workflow_dispatch:
@@ -19,40 +19,41 @@ jobs:
           unzip -q ndk.zip -d /opt
           echo "ANDROID_NDK_ROOT=/opt/android-ndk-r29" >> $GITHUB_ENV
 
-      - name: 📦 下载 Nginx + 依赖 + geoip2 模块源码
+      - name: 📦 下载并验证所有源码
         run: |
-          # Nginx
+          rm -rf nginx-* zlib-* pcre2-* openssl-* libmaxminddb* ngx_http_geoip2_module* || true
+
           wget https://nginx.org/download/nginx-1.28.2.tar.gz
           tar -xzf nginx-1.28.2.tar.gz
 
-          # Zlib
           wget https://zlib.net/zlib-1.3.2.tar.gz
           tar -xzf zlib-1.3.2.tar.gz
 
-          # PCRE2
           wget https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.44/pcre2-10.44.tar.gz
           tar -xzf pcre2-10.44.tar.gz
 
-          # OpenSSL
           wget https://www.openssl.org/source/openssl-3.3.2.tar.gz
           tar -xzf openssl-3.3.2.tar.gz
 
-          # libmaxminddb (geoip2 需要)
           git clone https://github.com/maxmind/libmaxminddb.git
           cd libmaxminddb
-          git fetch --tags  # 确保所有 tag 被 fetch
-          git checkout 1.13.2 || git checkout 1.9.1  # fallback to older if needed
+          git fetch --tags
+          git checkout 1.13.2
           cd ..
 
-          # ngx_http_geoip2_module
           git clone https://github.com/leev/ngx_http_geoip2_module.git
 
-          echo "源码目录检查:"
-          ls -la nginx-1.28.2/auto/configure || echo "configure missing!"
+          tree -L 2 nginx-1.28.2 || ls -laR nginx-1.28.2
 
-      - name: 🩹 注入 stubs + 权限修复
+      - name: 🩹 权限修复 + stubs 注入
         run: |
           cd nginx-1.28.2
+
+          if [ ! -f auto/configure ]; then
+            echo "ERROR: auto/configure not found!"
+            exit 1
+          fi
+
           chmod +x auto/configure
           ls -l auto/configure
 
@@ -70,7 +71,7 @@ jobs:
           echo " 8 bytes" > auto/types/uintptr
           echo " little endian" > auto/endianness
 
-      - name: 🔨 Configure Nginx - All Modules + geoip2 + perl dynamic
+      - name: 🔨 Configure Nginx - 所有模块
         run: |
           cd nginx-1.28.2
 
@@ -131,35 +132,41 @@ jobs:
             --with-file-aio \
             --with-poll_module \
             --with-select_module \
+            --with-cpp_test_module \
+            --with-google_perftools_module \
+            --with-rtsig_module \
+            --with-epoll_module \
             --add-dynamic-module=../ngx_http_geoip2_module \
-            --without-http_rewrite_module \
-            2>&1 | tee ../configure.log || (echo "Configure failed!"; cat objs/config.log 2>/dev/null | tail -n 80; exit 1)
+            2>&1 | tee ../configure.log || (echo "Configure 失败！"; tail -n 80 objs/config.log; exit 1)
 
-          ls -l Makefile objs/*.so 2>/dev/null || echo "动态模块未生成"
+          ls -l Makefile objs/nginx objs/*.so 2>/dev/null || echo "关键文件缺失"
 
-      - name: 🔨 Make + 提取二进制 & 动态模块
+      - name: 🔨 Make + 提取所有产物
         run: |
           cd nginx-1.28.2
           make -j$(nproc) || exit 1
-          mkdir -p ../build/install/arm64-v8a/sbin ../build/install/arm64-v8a/modules ../build/install/arm64-v8a/conf
+          mkdir -p ../build/install/arm64-v8a/{sbin,modules,conf}
           cp objs/nginx ../build/install/arm64-v8a/sbin/nginx
-          cp objs/*.so ../build/install/arm64-v8a/modules/ 2>/dev/null || echo "No .so modules generated"
-          cp -r conf/* ../build/install/arm64-v8a/conf/
+          cp objs/*.so ../build/install/arm64-v8a/modules/ 2>/dev/null || true
+          cp -r conf/* ../build/install/arm64-v8a/conf/ || true
           file ../build/install/arm64-v8a/sbin/nginx
-          ls -lh ../build/install/arm64-v8a/modules/
+          ls -lh ../build/install/arm64-v8a/modules/ ../build/install/arm64-v8a/sbin/nginx
 
-      - name: 📤 上传产物
+      - name: 📤 上传所有文件
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: nginx-arm64-static-full-modules
+          name: nginx-arm64-all-modules-full
           path: |
             build/install/arm64-v8a/
             configure.log
             make.log
             nginx-1.28.2/objs/config.log
 
-      - name: 📋 诊断
+      - name: 📋 最终诊断
         if: always()
         run: |
-          tail -n 80 configure.log 2>/dev/null || echo "No configure log"
+          echo "configure.log 最后 100 行:"
+          tail -n 100 configure.log 2>/dev/null || echo "无日志"
+          echo "make.log 最后 50 行:"
+          tail -n 50 make.log 2>/dev/null || echo "无 make 日志"
