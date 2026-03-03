@@ -38,7 +38,7 @@ jobs:
       - name: Create craft.yml (官方示例配置)
         run: |
           cat > craft.yml << 'EOF'
-          php-version: "8.5.2.tar.gz"
+          php-version: "8.5.2"
 
           extensions: "apcu,bcmath,calendar,ctype,curl,dba,dom,exif,fileinfo,filter,gd,iconv,mbregex,mbstring,mysqli,mysqlnd,opcache,openssl,pcntl,pdo,pdo_mysql,pdo_sqlite,phar,posix,readline,redis,session,simplexml,sockets,sodium,sqlite3,tokenizer,xml,xmlreader,xmlwriter,xsl,zip,zlib"
 
