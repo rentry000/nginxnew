@@ -1,4 +1,4 @@
-name: Build Static PHP 8.5.3 (使用官方直接 tar.gz 绕过 503)
+name: Build Static PHP 8.5.3 (彻底绕过 php.net 503)
 
 on:
   workflow_dispatch:
@@ -59,14 +59,17 @@ jobs:
         run: |
           rm -rf downloads buildroot || true
 
-      - name: 手动下载官方 PHP 8.5.3 tar.gz（绕过 php.net 503）
+      - name: 手动下载 + 解压官方 PHP 8.5.3（彻底绕过 503 查询）
         run: |
-          mkdir -p downloads
+          mkdir -p source/php-src downloads
+          echo "正在下载官方 PHP 源码..."
           curl -L -o downloads/php-8.5.3.tar.gz https://www.php.net/distributions/php-8.5.3.tar.gz
-          echo "PHP 源码已下载完成（大小应为 \~23MB）"
-          ls -lh downloads/php-8.5.3.tar.gz
+          echo "解压到 source/php-src/ ..."
+          tar -xzf downloads/php-8.5.3.tar.gz -C source/php-src --strip-components=1
+          echo "PHP 源码已准备好（大小应约 80MB 解压后）"
+          ls -lh source/php-src | head -n 5
 
-      - name: Download 其他依赖库（php-src 已存在，自动跳过查询）
+      - name: Download 其他库（php-src 已存在，自动跳过查询）
         run: |
           ./spc download all --with-php=8.5 --ignore-cache-sources=php-src --debug
 
@@ -83,6 +86,6 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: static-php-8.5.3-aarch64
+          name: static-php-8.5.3-linux-aarch64
           path: artifacts/
           retention-days: 7
