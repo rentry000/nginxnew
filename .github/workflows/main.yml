@@ -41,7 +41,7 @@ jobs:
             libsodium-dev libbrotli-dev liblz4-dev librdkafka-dev \
             re2c autopoint gettext
 
-      - name: Create craft.yml (最大化支持的扩展列表)
+      - name: Create craft.yml (移除 build-options 以避免解析错误)
         run: |
           cat > craft.yml << 'EOF'
           php-version: "${{ github.event.inputs.php_version || '8.5' }}"
@@ -63,16 +63,13 @@ jobs:
 
           download-options:
             prefer-pre-built: true
-
-          build-options:
-            strip: true
           EOF
 
       - name: Check environment with spc doctor
         run: |
           ./spc doctor || true
 
-      - name: Safe clean old caches (prevent spc dangerous rm)
+      - name: Safe clean old caches
         run: |
           rm -rf source downloads buildroot || true
 
@@ -82,7 +79,7 @@ jobs:
 
       - name: Build static PHP
         run: |
-          ./spc craft --debug   # 自动读取 ./craft.yml，无需 --config 或 --arch
+          ./spc craft --debug
 
       - name: Prepare artifacts
         run: |
