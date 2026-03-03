@@ -26,48 +26,47 @@ jobs:
           cd nginx-1.28.2
           echo "✅ Nginx 1.28.2 源码下载完成"
 
-      - name: 📦 构建依赖库 (Zlib, PCRE2, OpenSSL - 静态版本)
+      - name: 📦 构建依赖库 (Zlib 1.3.2, PCRE2 10.47, OpenSSL 3.6.1 - 静态版本)
         run: |
-          # Zlib (最新 1.3.1)
-          wget https://zlib.net/zlib-1.3.1.tar.gz
-          tar -xzf zlib-1.3.1.tar.gz
-          cd zlib-1.3.1
           export ANDROID_NDK_ROOT=/opt/android-ndk-r29
           export PATH=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
           export CC=aarch64-linux-android28-clang
           export AR=llvm-ar
           export RANLIB=llvm-ranlib
+          export STRIP=llvm-strip
+
+          # Zlib 1.3.2 (最新)
+          wget https://zlib.net/zlib-1.3.2.tar.gz
+          tar -xzf zlib-1.3.2.tar.gz
+          cd zlib-1.3.2
           ./configure --static --prefix=/tmp/deps/zlib
           make -j$(nproc)
           make install
           cd ..
 
-          # PCRE2 (最新 10.44)
-          wget https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.44/pcre2-10.44.tar.gz
-          tar -xzf pcre2-10.44.tar.gz
-          cd pcre2-10.44
-          export CC=aarch64-linux-android28-clang
+          # PCRE2 10.47 (最新)
+          wget https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.47/pcre2-10.47.tar.gz
+          tar -xzf pcre2-10.47.tar.gz
+          cd pcre2-10.47
           ./configure --host=aarch64-linux-android --enable-static --disable-shared --prefix=/tmp/deps/pcre2
           make -j$(nproc)
           make install
           cd ..
 
-          # OpenSSL (最新 3.3.2)
-          wget https://www.openssl.org/source/openssl-3.3.2.tar.gz
-          tar -xzf openssl-3.3.2.tar.gz
-          cd openssl-3.3.2
-          export CC=aarch64-linux-android28-clang
+          # OpenSSL 3.6.1 (最新系列)
+          wget https://github.com/openssl/openssl/releases/download/openssl-3.6.1/openssl-3.6.1.tar.gz
+          tar -xzf openssl-3.6.1.tar.gz
+          cd openssl-3.6.1
           ./Configure android-arm64 -static --prefix=/tmp/deps/openssl --openssldir=/tmp/deps/openssl/ssl no-tests no-shared
           make -j$(nproc)
           make install_sw
           cd ..
 
-          echo "✅ 所有依赖库 (Zlib, PCRE2, OpenSSL) 已静态构建完成"
+          echo "✅ 所有依赖库已静态构建完成 (Zlib 1.3.2, PCRE2 10.47, OpenSSL 3.6.1)"
 
       - name: 🩹 注入交叉编译修复 (sizeof / uintptr / endianness stubs)
         run: |
           cd nginx-1.28.2
-          # 注入 sizeof stub (arm64-v8a LP64)
           cat > auto/types/sizeof << 'EOF'
           #!/bin/sh
           case "$1" in
@@ -79,15 +78,12 @@ jobs:
           EOF
           chmod +x auto/types/sizeof
 
-          # uintptr stub
           echo " 8 bytes" > auto/types/uintptr
-
-          # endianness stub
           echo " little endian" > auto/endianness
 
-          echo "✅ 交叉编译 stubs 已注入 (绕过 Exec format error)"
+          echo "✅ 交叉编译 stubs 已注入"
 
-      - name: 🔨 配置 Toolchain + Configure Nginx
+      - name: 🔨 配置 Toolchain + Configure Nginx (全面模块 + 静态)
         run: |
           cd nginx-1.28.2
           export ANDROID_NDK_ROOT=/opt/android-ndk-r29
@@ -97,11 +93,8 @@ jobs:
           export LD=ld.lld
           export RANLIB=llvm-ranlib
           export STRIP=llvm-strip
-          export SYSROOT=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/sysroot
           export CFLAGS="-Os -fPIE -fPIC -DNGX_HAVE_SCHED_SETAFFINITY=0"
           export LDFLAGS="-pie -Wl,--gc-sections -Wl,--strip-all -static"
-
-          echo "🔍 CC: $CC"
 
           ./auto/configure \
             --prefix=/data/local/tmp/nginx \
@@ -116,15 +109,36 @@ jobs:
             --with-http_v2_module \
             --with-http_v3_module \
             --with-http_gzip_static_module \
+            --with-http_stub_status_module \
+            --with-http_realip_module \
+            --with-http_addition_module \
+            --with-http_sub_module \
+            --with-http_dav_module \
+            --with-http_flv_module \
+            --with-http_mp4_module \
+            --with-http_gunzip_module \
+            --with-http_auth_request_module \
+            --with-http_random_index_module \
+            --with-http_secure_link_module \
+            --with-http_slice_module \
             --with-stream \
             --with-stream_ssl_module \
+            --with-stream_realip_module \
+            --with-stream_geoip_module=dynamic \
+            --with-stream_geo_module \
+            --with-stream_return_module \
+            --with-stream_set_module \
+            --with-stream_upstream_hash_module \
+            --with-stream_upstream_least_conn_module \
+            --with-stream_upstream_random_module \
             --with-threads \
             --with-file-aio \
             --with-poll_module \
-            --without-http_rewrite_module  # 如果不需要 rewrite，可移除 \
+            --without-http_rewrite_module \
+            --without-http_charset_module \
             2>&1 | tee ../configure.log
 
-          echo "✅ Nginx configure 完成 (检查 configure.log 如有错误)"
+          echo "✅ Configure 完成 (查看 configure.log 如有警告)"
 
       - name: 🔨 Make + Install (生成静态二进制)
         run: |
@@ -134,22 +148,22 @@ jobs:
           cp objs/nginx ../build/install/arm64-v8a/sbin/nginx
           cp -r conf/* ../build/install/arm64-v8a/conf/ || true
           file ../build/install/arm64-v8a/sbin/nginx
-          echo "✅ Nginx 静态二进制已生成 (arm64-v8a)"
+          echo "✅ Nginx 静态二进制已生成 (arm64-v8a, 静态链接)"
 
       - name: 📤 上传产物 + 日志
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: nginx-android-arm64-static
+          name: nginx-android-arm64-static-full
           path: |
             build/install/arm64-v8a/
             configure.log
             make.log
 
-      - name: 📋 构建摘要 (失败时显示错误)
-        if: failure()
+      - name: 📋 构建摘要
+        if: always()
         run: |
-          echo "❌ 构建失败！最后 50 行 configure.log："
+          echo "=== 最后 50 行 configure.log ==="
           tail -n 50 configure.log
-          echo "❌ 最后 50 行 make.log："
+          echo "=== 最后 50 行 make.log ==="
           tail -n 50 make.log
