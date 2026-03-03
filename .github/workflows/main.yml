@@ -1,4 +1,4 @@
-name: Build Static PHP 8.5 (linux-aarch64) with Maximum Extensions
+name: Build Static PHP 8.5 (linux-aarch64) with Specified Extensions
 
 on:
   workflow_dispatch:
@@ -41,20 +41,19 @@ jobs:
             libsodium-dev libbrotli-dev liblz4-dev librdkafka-dev \
             re2c autopoint gettext
 
-      - name: Create craft.yml (移除 build-options 以避免解析错误)
+      - name: Create craft.yml with your specified extensions
         run: |
           cat > craft.yml << 'EOF'
           php-version: "${{ github.event.inputs.php_version || '8.5' }}"
 
           extensions: >-
             amqp apcu ast bcmath brotli bz2 calendar ctype curl dba dio dom ds
-            enchant ev event exif ffi fileinfo filter ftp gd gettext gmp iconv
-            igbinary imagick imap intl ldap libxml lz4 maxminddb mbregex mbstring
-            memcache memcached msgpack mysqli mysqlnd opcache openssl pcntl
-            pcov pdo pdo_mysql pdo_odbc pdo_pgsql pdo_sqlite pgsql phar posix
-            protobuf rdkafka readline redis session shmop simdjson simplexml
-            snappy sockets sodium sqlite3 ssh2 sysvmsg sysvsem sysvshm tidy
-            tokenizer uuid xdebug xml xmlreader xmlwriter xsl xz yaml zip zlib zstd
+            ev event exif ffi fileinfo filter ftp gd gettext gmp iconv igbinary
+            imap intl ldap libxml lz4 mbregex mbstring memcache memcached msgpack
+            mysqli mysqlnd opcache openssl pcntl pcov pdo pdo_mysql pdo_odbc pdo_pgsql
+            pdo_sqlite pgsql phar posix readline redis session shmop simdjson simplexml
+            snappy sockets sodium sqlite3 ssh2 sysvmsg sysvsem sysvshm tidy tokenizer
+            xml xmlreader xmlwriter xsl xz yaml zip zlib zstd
 
           sapi:
             - cli
@@ -69,13 +68,14 @@ jobs:
         run: |
           ./spc doctor || true
 
-      - name: Safe clean old caches
+      - name: Safe clean old caches (prevent spc dangerous rm)
         run: |
           rm -rf source downloads buildroot || true
 
       - name: Download sources and libs
         run: |
-          ./spc download all --with-php=${{ github.event.inputs.php_version || '8.5' }}
+          ./spc download all --with-php=${{ github.event.inputs.php_version || '8.5' }} --debug || true
+          # 加 --debug 看详细下载过程；|| true 容忍部分失败，继续尝试 craft
 
       - name: Build static PHP
         run: |
