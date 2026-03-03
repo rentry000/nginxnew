@@ -74,7 +74,7 @@ jobs:
 
       - name: Check environment and build static PHP
         run: |
-          ./spc doctor --no-check-download
+          ./spc doctor --auto-fix     # ← 这里改了：用 --auto-fix 自动修复依赖
           ./spc download all --clean --with-php=${{ github.event.inputs.php_version || '8.5' }}
           ./spc craft --config craft.yml --arch aarch64
 
