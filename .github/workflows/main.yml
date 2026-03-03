@@ -40,24 +40,24 @@ jobs:
 
           git clone https://github.com/leev/ngx_http_geoip2_module.git
 
-      - name: 🩹 stubs 注入 + 权限修复
+      - name: 🩹 创建 compiler wrapper + stubs 注入
         run: |
           cd nginx-1.28.2
           chmod +x configure
           mkdir -p auto/types
 
+          # 所有 stubs
           cat > auto/types/sizeof << 'EOF'
-          #!/bin/sh
-          case "$1" in
-            int|unsigned\ int) echo " 4 bytes" ;;
-            long|unsigned\ long) echo " 8 bytes" ;;
-            size_t|off_t|time_t|"void *") echo " 8 bytes" ;;
-            "long long"|"unsigned long long") echo " 8 bytes" ;;
-            *) echo " 8 bytes" ;;
-          esac
-          EOF
+#!/bin/sh
+case "$1" in
+  int|unsigned\ int) echo " 4 bytes" ;;
+  long|unsigned\ long) echo " 8 bytes" ;;
+  size_t|off_t|time_t|"void *") echo " 8 bytes" ;;
+  "long long"|"unsigned long long") echo " 8 bytes" ;;
+  *) echo " 8 bytes" ;;
+esac
+EOF
           chmod +x auto/types/sizeof
-
           echo " 8 bytes" > auto/types/uintptr
           echo " 8 bytes" > auto/types/uintptr_t
           echo " 8 bytes" > auto/types/pointer
@@ -66,28 +66,32 @@ jobs:
           echo " 8 bytes" > auto/types/size_t
           echo " little endian" > auto/endianness
 
-      - name: 🔨 Configure Nginx - 所有模块（最终强化版 CC）
+          # 🔥 关键：创建 compiler wrapper
+          cat > /tmp/cc-wrapper << 'EOF'
+          #!/bin/bash
+          TOOLCHAIN=/opt/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64
+          exec $TOOLCHAIN/bin/aarch64-linux-android28-clang \
+            -target aarch64-linux-android28 \
+            --sysroot=$TOOLCHAIN/sysroot \
+            -B$TOOLCHAIN/bin \
+            "$@"
+          EOF
+          chmod +x /tmp/cc-wrapper
+
+      - name: 🔨 Configure Nginx - 所有模块
         run: |
           cd nginx-1.28.2
 
-          TOOLCHAIN=/opt/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64
-          export PATH=$TOOLCHAIN/bin:$PATH
+          export CC=/tmp/cc-wrapper
+          export AR=/opt/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
+          export RANLIB=/opt/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib
+          export LD=/opt/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64/bin/ld.lld
 
-          # 🔥 最终强化：完整路径 + CC_TEST_FLAGS + CROSS_COMPILE
-          export CC="$TOOLCHAIN/bin/aarch64-linux-android28-clang"
-          export CROSS_COMPILE=aarch64-linux-android28-
-          export CC_TEST_FLAGS="-target aarch64-linux-android28 --sysroot=$TOOLCHAIN/sysroot -B$TOOLCHAIN/bin"
-
-          export AR="$TOOLCHAIN/bin/llvm-ar"
-          export RANLIB="$TOOLCHAIN/bin/llvm-ranlib"
-          export LD="$TOOLCHAIN/bin/ld.lld"
-          export STRIP="$TOOLCHAIN/bin/llvm-strip"
-
-          export CFLAGS="-Os -fPIC -fPIE -DNGX_HAVE_SCHED_SETAFFINITY=0 -D__ANDROID_API__=28"
+          export CFLAGS="-Os -fPIC -fPIE -DNGX_HAVE_SCHED_SETAFFINITY=0"
           export LDFLAGS="-static -pie -Wl,--gc-sections -Wl,--strip-all -fuse-ld=lld"
 
-          echo "CC 最终测试："
-          $CC --version && echo "✅ CC 可用"
+          echo "Wrapper 测试："
+          $CC --version
 
           ./configure \
             --prefix=/data/local/tmp/nginx \
@@ -158,5 +162,5 @@ jobs:
         run: |
           echo "=== configure.log 最后 100 行 ==="
           tail -n 100 configure.log 2>/dev/null || echo "无日志"
-          echo "=== objs/config.log 最后 100 行（关键！）==="
+          echo "=== objs/config.log 最后 100 行 ==="
           tail -n 100 nginx-1.28.2/objs/config.log 2>/dev/null || echo "无 config.log"
