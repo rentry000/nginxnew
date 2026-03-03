@@ -43,14 +43,12 @@ jobs:
 
           git clone https://github.com/leev/ngx_http_geoip2_module.git
 
-      - name: 🩹 全面 stubs 注入 + 权限修复
+      - name: 🩹 stubs 注入 + 权限修复
         run: |
           cd nginx-1.28.2
-
           chmod +x configure
-          ls -l configure
-
           mkdir -p auto/types
+
           cat > auto/types/sizeof << 'EOF'
           #!/bin/sh
           case "$1" in
@@ -71,9 +69,7 @@ jobs:
           echo " 8 bytes" > auto/types/size_t
           echo " little endian" > auto/endianness
 
-          echo "✅ 所有 size 测试已强制覆盖"
-
-      - name: 🔨 Configure Nginx - 所有模块
+      - name: 🔨 Configure Nginx - 所有有效模块（已清理无效选项）
         run: |
           cd nginx-1.28.2
 
@@ -113,18 +109,11 @@ jobs:
             --with-http_random_index_module \
             --with-http_secure_link_module \
             --with-http_slice_module \
-            --with-http_auth_basic_module \
-            --with-http_charset_module \
-            --with-http_geoip_module=dynamic \
-            --with-http_image_filter_module=dynamic \
-            --with-http_xslt_module=dynamic \
-            --with-http_perl_module=dynamic \
             --with-mail \
             --with-mail_ssl_module \
             --with-stream \
             --with-stream_ssl_module \
             --with-stream_realip_module \
-            --with-stream_geoip_module=dynamic \
             --with-stream_return_module \
             --with-stream_set_module \
             --with-stream_upstream_hash_module \
@@ -133,13 +122,13 @@ jobs:
             --with-threads \
             --with-file-aio \
             --with-poll_module \
-            --with-select_module \
-            --with-cpp_test_module \
-            --with-google_perftools_module \
-            --with-rtsig_module \
-            --with-epoll_module \
+            --with-http_geoip_module=dynamic \
+            --with-http_image_filter_module=dynamic \
+            --with-http_xslt_module=dynamic \
+            --with-http_perl_module=dynamic \
+            --with-stream_geoip_module=dynamic \
             --add-dynamic-module=../ngx_http_geoip2_module \
-            2>&1 | tee ../configure.log || (echo "❌ Configure 失败！以下是真实错误原因："; tail -n 100 objs/config.log 2>/dev/null || tail -n 100 ../configure.log; exit 1)
+            2>&1 | tee ../configure.log || (echo "Configure 失败！"; tail -n 100 objs/config.log 2>/dev/null || tail -n 100 ../configure.log; exit 1)
 
           ls -l Makefile objs/nginx objs/*.so 2>/dev/null || echo "关键文件缺失"
 
@@ -170,5 +159,5 @@ jobs:
         run: |
           echo "=== configure.log 最后 100 行 ==="
           tail -n 100 configure.log 2>/dev/null || echo "无日志"
-          echo "=== objs/config.log 最后 100 行（关键！）==="
+          echo "=== objs/config.log 最后 100 行 ==="
           tail -n 100 nginx-1.28.2/objs/config.log 2>/dev/null || echo "无 config.log"
