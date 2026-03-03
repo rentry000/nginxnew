@@ -1,162 +1,384 @@
-name: Build Latest Nginx Static Binary + All Modules (including geoip2 & perl dynamic) for Android arm64-v8a (NDK r29)
+name: Build+Run Verify Nginx Android arm64 (HTTP/3 QUIC + stream + mail) with NDK r29
 
 on:
   workflow_dispatch:
-
-permissions:
-  contents: write
+    inputs:
+      nginx_version:
+        required: true
+        default: "1.27.4"
+      openssl_quic_repo:
+        required: true
+        default: "https://github.com/quictls/openssl"
+      openssl_quic_ref:
+        required: true
+        default: "openssl-3.3.2-quic1"
+      pcre2_version:
+        required: true
+        default: "10.44"
+      zlib_version:
+        required: true
+        default: "1.3.1"
+      api_level:
+        description: "Android API level (>=26 recommended for arm64 emulator)"
+        required: true
+        default: "30"
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  build_and_verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    env:
+      ABI: arm64-v8a
+      TARGET_HOST: aarch64-linux-android
+      NDK_ZIP_URL: https://dl.google.com/android/repository/android-ndk-r29-linux.zip
+
     steps:
-      - name: 🌱 准备环境 + NDK r29 + standalone toolchain
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential wget unzip tree patch perl git libgd-dev libxslt1-dev
+          sudo apt-get install -y \
+            build-essential ca-certificates curl file git make ninja-build perl pkg-config python3 \
+            tar xz-utils unzip autoconf automake libtool gawk \
+            qemu-user-static
 
-          wget -q https://dl.google.com/android/repository/android-ndk-r29-linux.zip -O ndk.zip
-          unzip -q ndk.zip -d /opt
-          echo "ANDROID_NDK_ROOT=/opt/android-ndk-r29" >> $GITHUB_ENV
-
-          # 🔥 关键：生成 standalone toolchain（官方推荐方式）
-          python3 $ANDROID_NDK_ROOT/build/tools/make_standalone_toolchain.py \
-            --arch arm64 --api 28 --install-dir /tmp/android-toolchain
-          echo "✅ Standalone toolchain 已生成"
-
-      - name: 📦 下载并验证所有源码
+      - name: Download Android NDK r29
         run: |
-          rm -rf nginx-* zlib-* pcre2-* openssl-* libmaxminddb* ngx_http_geoip2_module* || true
+          set -e
+          mkdir -p "$GITHUB_WORKSPACE/toolchains"
+          cd "$GITHUB_WORKSPACE/toolchains"
+          curl -L "$NDK_ZIP_URL" -o ndk.zip
+          unzip -q ndk.zip
+          echo "NDK_HOME=$GITHUB_WORKSPACE/toolchains/android-ndk-r29" >> $GITHUB_ENV
 
-          wget https://nginx.org/download/nginx-1.28.2.tar.gz
-          tar -xzf nginx-1.28.2.tar.gz
-
-          wget https://zlib.net/zlib-1.3.2.tar.gz
-          tar -xzf zlib-1.3.2.tar.gz
-
-          wget https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.44/pcre2-10.44.tar.gz
-          tar -xzf pcre2-10.44.tar.gz
-
-          wget https://www.openssl.org/source/openssl-3.3.2.tar.gz
-          tar -xzf openssl-3.3.2.tar.gz
-
-          git clone https://github.com/maxmind/libmaxminddb.git
-          cd libmaxminddb && git fetch --tags && git checkout 1.13.2 && cd ..
-
-          git clone https://github.com/leev/ngx_http_geoip2_module.git
-
-      - name: 🩹 stubs 注入 + 权限修复
+      - name: Setup toolchain vars
         run: |
-          cd nginx-1.28.2
-          chmod +x configure
-          mkdir -p auto/types
+          set -e
+          API="${{ inputs.api_level }}"
+          TOOLCHAIN="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
+          SYSROOT="$TOOLCHAIN/sysroot"
 
-          cat > auto/types/sizeof << 'EOF'
-          #!/bin/sh
-          case "$1" in
-            int|unsigned\ int) echo " 4 bytes" ;;
-            long|unsigned\ long) echo " 8 bytes" ;;
-            size_t|off_t|time_t|"void *") echo " 8 bytes" ;;
-            "long long"|"unsigned long long") echo " 8 bytes" ;;
-            *) echo " 8 bytes" ;;
-          esac
-          EOF
-          chmod +x auto/types/sizeof
+          echo "API=$API" >> $GITHUB_ENV
+          echo "TOOLCHAIN=$TOOLCHAIN" >> $GITHUB_ENV
+          echo "SYSROOT=$SYSROOT" >> $GITHUB_ENV
 
-          echo " 8 bytes" > auto/types/uintptr
-          echo " 8 bytes" > auto/types/uintptr_t
-          echo " 8 bytes" > auto/types/pointer
-          echo " 4 bytes" > auto/types/int
-          echo " 8 bytes" > auto/types/long
-          echo " 8 bytes" > auto/types/size_t
-          echo " little endian" > auto/endianness
+          echo "CC=$TOOLCHAIN/bin/${TARGET_HOST}${API}-clang" >> $GITHUB_ENV
+          echo "CXX=$TOOLCHAIN/bin/${TARGET_HOST}${API}-clang++" >> $GITHUB_ENV
+          echo "AR=$TOOLCHAIN/bin/llvm-ar" >> $GITHUB_ENV
+          echo "RANLIB=$TOOLCHAIN/bin/llvm-ranlib" >> $GITHUB_ENV
+          echo "STRIP=$TOOLCHAIN/bin/llvm-strip" >> $GITHUB_ENV
+          echo "READELF=$TOOLCHAIN/bin/llvm-readelf" >> $GITHUB_ENV
 
-      - name: 🔨 Configure Nginx - 所有模块
+          PREFIX="$GITHUB_WORKSPACE/out/$ABI"
+          SRC="$GITHUB_WORKSPACE/src"
+          BUILD="$GITHUB_WORKSPACE/build"
+          echo "PREFIX=$PREFIX" >> $GITHUB_ENV
+          echo "SRC=$SRC" >> $GITHUB_ENV
+          echo "BUILD=$BUILD" >> $GITHUB_ENV
+          mkdir -p "$PREFIX" "$SRC" "$BUILD"
+
+      - name: Fetch sources
         run: |
-          cd nginx-1.28.2
+          set -e
+          cd "$SRC"
+          curl -L "https://nginx.org/download/nginx-${{ inputs.nginx_version }}.tar.gz" -o nginx.tgz
+          tar -xf nginx.tgz
 
-          TOOLCHAIN=/tmp/android-toolchain
-          export PATH=$TOOLCHAIN/bin:$PATH
+          git clone --depth 1 --branch "${{ inputs.openssl_quic_ref }}" "${{ inputs.openssl_quic_repo }}" openssl-quic
 
-          export CC=$TOOLCHAIN/bin/aarch64-linux-android-clang
-          export AR=$TOOLCHAIN/bin/llvm-ar
-          export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
-          export LD=$TOOLCHAIN/bin/ld.lld
+          curl -L "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${{ inputs.pcre2_version }}/pcre2-${{ inputs.pcre2_version }}.tar.gz" -o pcre2.tgz
+          tar -xf pcre2.tgz
 
-          export CFLAGS="-Os -fPIC -fPIE -DNGX_HAVE_SCHED_SETAFFINITY=0"
-          export LDFLAGS="-static -pie -Wl,--gc-sections -Wl,--strip-all -fuse-ld=lld"
+          curl -L "https://zlib.net/zlib-${{ inputs.zlib_version }}.tar.gz" -o zlib.tgz
+          tar -xf zlib.tgz
 
-          echo "CC 测试："
-          $CC --version
+      - name: Build zlib (static)
+        run: |
+          set -e
+          cd "$SRC/zlib-${{ inputs.zlib_version }}"
+          export CC="$CC" AR="$AR" RANLIB="$RANLIB"
+          export CFLAGS="--sysroot=$SYSROOT -O2 -fPIC"
+          export LDFLAGS="--sysroot=$SYSROOT"
+          ./configure --static --prefix="$PREFIX"
+          make -j"$(nproc)"
+          make install
+
+      - name: Build PCRE2 (static)
+        run: |
+          set -e
+          cd "$SRC/pcre2-${{ inputs.pcre2_version }}"
+          export CC="$CC" AR="$AR" RANLIB="$RANLIB"
+          export CFLAGS="--sysroot=$SYSROOT -O2 -fPIC"
+          export CPPFLAGS="-I$PREFIX/include"
+          export LDFLAGS="--sysroot=$SYSROOT -L$PREFIX/lib"
+          ./configure \
+            --host="$TARGET_HOST" \
+            --prefix="$PREFIX" \
+            --disable-shared \
+            --enable-static \
+            --enable-pcre2-8 \
+            --disable-pcre2-16 \
+            --disable-pcre2-32
+          make -j"$(nproc)"
+          make install
+
+      - name: Build QUIC OpenSSL (static)
+        run: |
+          set -e
+          cd "$SRC/openssl-quic"
+          export ANDROID_NDK_HOME="$NDK_HOME"
+          export PATH="$TOOLCHAIN/bin:$PATH"
+          export CC="$CC" AR="$AR" RANLIB="$RANLIB"
+          export CFLAGS="--sysroot=$SYSROOT -O2 -fPIC"
+          export LDFLAGS="--sysroot=$SYSROOT -L$PREFIX/lib"
+          ./Configure android-arm64 \
+            -D__ANDROID_API__="$API" \
+            no-shared no-tests no-ui \
+            --prefix="$PREFIX" \
+            --openssldir="$PREFIX/ssl" \
+            -fPIC
+          make -j"$(nproc)"
+          make install_sw
+
+      - name: Build Nginx (http3/quic + stream + mail)
+        run: |
+          set -e
+          cd "$SRC/nginx-${{ inputs.nginx_version }}"
+          export CC="$CC"
+          export CFLAGS="--sysroot=$SYSROOT -O2 -fPIC"
+          export CPPFLAGS="-I$PREFIX/include"
+          export LDFLAGS="--sysroot=$SYSROOT -L$PREFIX/lib"
 
           ./configure \
             --prefix=/data/local/tmp/nginx \
-            --with-cc="$CC" \
-            --with-cc-opt="$CFLAGS" \
-            --with-ld-opt="$LDFLAGS" \
-            --with-zlib=../zlib-1.3.2 \
-            --with-pcre=../pcre2-10.44 \
-            --with-openssl=../openssl-3.3.2 \
+            --with-compat \
+            --with-pcre="$SRC/pcre2-${{ inputs.pcre2_version }}" \
+            --with-zlib="$SRC/zlib-${{ inputs.zlib_version }}" \
+            --with-openssl="$SRC/openssl-quic" \
+            --with-openssl-opt="no-shared" \
+            \
             --with-http_ssl_module \
             --with-http_v2_module \
             --with-http_v3_module \
             --with-http_gzip_static_module \
             --with-http_stub_status_module \
             --with-http_realip_module \
-            --with-http_addition_module \
-            --with-http_sub_module \
-            --with-http_dav_module \
-            --with-http_flv_module \
-            --with-http_mp4_module \
-            --with-http_gunzip_module \
             --with-http_auth_request_module \
-            --with-http_random_index_module \
-            --with-http_secure_link_module \
-            --with-http_slice_module \
-            --with-mail \
-            --with-mail_ssl_module \
+            \
             --with-stream \
             --with-stream_ssl_module \
+            --with-stream_ssl_preread_module \
             --with-stream_realip_module \
-            --with-threads \
-            --with-file-aio \
-            --with-poll_module \
-            --with-http_geoip_module=dynamic \
-            --with-http_image_filter_module=dynamic \
-            --with-http_xslt_module=dynamic \
-            --with-http_perl_module=dynamic \
-            --with-stream_geoip_module=dynamic \
-            --add-dynamic-module=../ngx_http_geoip2_module \
-            2>&1 | tee ../configure.log || (echo "❌ Configure 失败！真实错误："; tail -n 100 objs/config.log 2>/dev/null || tail -n 100 ../configure.log; exit 1)
+            \
+            --with-mail \
+            --with-mail_ssl_module \
+            \
+            --with-cc-opt="$CFLAGS $CPPFLAGS" \
+            --with-ld-opt="$LDFLAGS -Wl,--gc-sections"
 
-          ls -l Makefile objs/nginx objs/*.so 2>/dev/null || echo "关键文件缺失"
+          make -j"$(nproc)"
+          mkdir -p "$PREFIX/bin"
+          cp -v objs/nginx "$PREFIX/bin/nginx"
+          "$STRIP" -s "$PREFIX/bin/nginx" || true
 
-      - name: 🔨 Make + 提取产物
+          file "$PREFIX/bin/nginx"
+          "$READELF" -d "$PREFIX/bin/nginx" || true
+
+      - name: Create Android-like runtime tree + config + certs
         run: |
-          cd nginx-1.28.2
-          make -j$(nproc) || exit 1
-          mkdir -p ../build/install/arm64-v8a/{sbin,modules,conf}
-          cp objs/nginx ../build/install/arm64-v8a/sbin/nginx
-          cp objs/*.so ../build/install/arm64-v8a/modules/ 2>/dev/null || true
-          cp -r conf/* ../build/install/arm64-v8a/conf/ || true
-          file ../build/install/arm64-v8a/sbin/nginx
-          ls -lh ../build/install/arm64-v8a/modules/ ../build/install/arm64-v8a/sbin/nginx
+          set -e
+          R="$PREFIX/runtime"
+          mkdir -p "$R"/{conf,html,logs,client_body_temp,proxy_temp,fastcgi_temp,uwsgi_temp,scgi_temp}
 
-      - name: 📤 上传产物
-        if: always()
+          # self-signed cert for TLS + QUIC
+          mkdir -p "$R/conf/certs"
+          openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout "$R/conf/certs/server.key" \
+            -out "$R/conf/certs/server.crt" \
+            -subj "/CN=localhost" -days 3
+
+          echo "it works" > "$R/html/index.html"
+
+          # Nginx config:
+          # - HTTP on 8080
+          # - HTTPS/TLS on 8443
+          # - HTTP/3 QUIC on 8443 quic (same port)
+          cat > "$R/conf/nginx.conf" <<'EOF'
+          worker_processes  1;
+          error_log  logs/error.log info;
+          pid        logs/nginx.pid;
+
+          events { worker_connections 1024; }
+
+          http {
+            include       mime.types;
+            default_type  application/octet-stream;
+            access_log logs/access.log;
+            sendfile on;
+
+            # required temp paths (under -p prefix)
+            client_body_temp_path client_body_temp;
+            proxy_temp_path       proxy_temp;
+            fastcgi_temp_path     fastcgi_temp;
+            uwsgi_temp_path       uwsgi_temp;
+            scgi_temp_path        scgi_temp;
+
+            server {
+              listen 8080;
+              server_name localhost;
+
+              location / {
+                root html;
+                index index.html;
+              }
+
+              location /status { stub_status; }
+            }
+
+            server {
+              # TCP/TLS
+              listen 8443 ssl;
+              # QUIC/HTTP3 (UDP)
+              listen 8443 quic reuseport;
+
+              server_name localhost;
+
+              ssl_certificate     conf/certs/server.crt;
+              ssl_certificate_key conf/certs/server.key;
+
+              # Enable HTTP/3
+              add_header alt-svc 'h3=":8443"; ma=86400' always;
+              add_header x-quic 'h3' always;
+
+              location / {
+                root html;
+                index index.html;
+              }
+            }
+          }
+          EOF
+
+          cat > "$R/start.sh" <<'EOF'
+          #!/system/bin/sh
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          chmod +x "$DIR/../bin/nginx" 2>/dev/null
+          "$DIR/../bin/nginx" -p "$DIR" -c conf/nginx.conf
+          EOF
+          chmod +x "$R/start.sh"
+
+          cat > "$R/stop.sh" <<'EOF'
+          #!/system/bin/sh
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          "$DIR/../bin/nginx" -p "$DIR" -c conf/nginx.conf -s quit
+          EOF
+          chmod +x "$R/stop.sh"
+
+      # =========================
+      # Runtime verification
+      # =========================
+      # GitHub hosted runner 是 x86_64 Linux，无法直接运行 Android aarch64 可执行文件。
+      # 这里采用“Android 用户空间 + qemu-aarch64” 的方式进行实际运行验证：
+      # - 下载 Termux 的 aarch64 rootfs（其 libc 是 bionic，贴近 Android）
+      # - 用 qemu-aarch64 在 runner 上执行 nginx，并用 curl 访问端口验证
+      #
+      # 注意：如果你的 nginx 链接到了 Android 动态链接器路径（/system/bin/linker64），
+      # 在 rootfs 中可能不同。本脚本用 patchelf 将 interpreter 改为 rootfs 的 linker。
+      #
+      - name: Prepare Termux aarch64 rootfs for runtime verify (bionic) + patchelf
+        run: |
+          set -e
+          sudo apt-get install -y patchelf
+
+          cd "$BUILD"
+
+          # Termux bootstrap (aarch64). 选一个稳定版本号即可；如失效可换最新版。
+          TERMUX_BOOTSTRAP_URL="https://github.com/termux/termux-packages/releases/download/bootstrap-2024.10.20-r1/termux-bootstrap-aarch64.zip"
+          curl -L "$TERMUX_BOOTSTRAP_URL" -o termux-rootfs.zip
+          unzip -q termux-rootfs.zip -d termux-rootfs
+
+          # termux rootfs 解压后结构一般为 termux-rootfs/data/data/com.termux/files/usr
+          ROOT="$BUILD/termux-rootfs/data/data/com.termux/files/usr"
+          echo "TERMUX_ROOT=$ROOT" >> $GITHUB_ENV
+
+          test -f "$ROOT/bin/sh"
+          ls -la "$ROOT/lib" | head
+
+      - name: Patch interpreter + run nginx under qemu-aarch64 + curl verify
+        run: |
+          set -e
+
+          BIN="$PREFIX/bin/nginx"
+          ROOT="$TERMUX_ROOT"
+          RUNTIME="$PREFIX/runtime"
+
+          # 1) 查看当前 interpreter
+          echo "==== readelf -l (before) ===="
+          "$READELF" -l "$BIN" | sed -n '1,120p' || true
+
+          # 2) Termux bionic linker 通常在 $ROOT/lib/ld-android.so 或 $ROOT/lib/ld-linux-aarch64.so.1 之类
+          #    这里做一次探测
+          LINKER=""
+          for cand in "$ROOT/lib/ld-android.so" "$ROOT/lib/ld-linux-aarch64.so.1" "$ROOT/lib/ld-musl-aarch64.so.1" ; do
+            if [ -f "$cand" ]; then LINKER="$cand"; break; fi
+          done
+          if [ -z "$LINKER" ]; then
+            echo "Cannot find suitable linker in termux rootfs lib/. Listing:"
+            ls -la "$ROOT/lib"
+            exit 1
+          fi
+          echo "Using linker: $LINKER"
+
+          # 3) patch interpreter + rpath
+          patchelf --set-interpreter "$LINKER" "$BIN"
+          patchelf --set-rpath "$ROOT/lib" "$BIN" || true
+
+          echo "==== readelf -l (after) ===="
+          "$READELF" -l "$BIN" | sed -n '1,120p' || true
+          echo "==== readelf -d (after) ===="
+          "$READELF" -d "$BIN" | sed -n '1,200p' || true
+
+          # 4) 在 qemu 下启动 nginx（使用 termux rootfs 的动态库）
+          #    -E LD_LIBRARY_PATH 指向 rootfs lib
+          #    使用 -L 指定 rootfs（qemu 会把它当作“系统根”）
+          #
+          #    先跑 nginx -V 验证可执行
+          qemu-aarch64 -L "$ROOT" -E LD_LIBRARY_PATH="$ROOT/lib" "$BIN" -V
+
+          # 启动
+          qemu-aarch64 -L "$ROOT" -E LD_LIBRARY_PATH="$ROOT/lib" \
+            "$BIN" -p "$RUNTIME" -c conf/nginx.conf
+
+          # 等待端口
+          for i in $(seq 1 30); do
+            if curl -fsS "http://127.0.0.1:8080/" >/dev/null 2>&1; then
+              echo "HTTP 8080 is up"
+              break
+            fi
+            sleep 1
+          done
+
+          # HTTP 验证
+          curl -fsS "http://127.0.0.1:8080/" | grep -q "it works"
+
+          # HTTPS 验证（http3 不易在 runner 上稳定验证，这里先验证 TLS 端口可用）
+          curl -kfsS "https://127.0.0.1:8443/" | grep -q "it works"
+
+          # 停止
+          qemu-aarch64 -L "$ROOT" -E LD_LIBRARY_PATH="$ROOT/lib" \
+            "$BIN" -p "$RUNTIME" -c conf/nginx.conf -s quit
+
+          echo "Runtime verification OK."
+
+      - name: Package artifact
+        run: |
+          set -e
+          cd "$PREFIX"
+          tar -czf "$GITHUB_WORKSPACE/nginx-android-arm64-v8a-api${API}.tar.gz" .
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nginx-arm64-all-modules-full
-          path: |
-            build/install/arm64-v8a/
-            configure.log
-            make.log
-            nginx-1.28.2/objs/config.log
-
-      - name: 📋 诊断
-        if: always()
-        run: |
-          echo "=== configure.log 最后 100 行 ==="
-          tail -n 100 configure.log 2>/dev/null || echo "无日志"
-          echo "=== objs/config.log 最后 100 行 ==="
-          tail -n 100 nginx-1.28.2/objs/config.log 2>/dev/null || echo "无 config.log"
+          name: nginx-android-arm64-v8a-api${{ inputs.api_level }}
+          path: nginx-android-arm64-v8a-api${{ inputs.api_level }}.tar.gz
