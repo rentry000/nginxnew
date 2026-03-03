@@ -1,4 +1,4 @@
-name: Build Static PHP 8.5 (linux-aarch64) with Specified Extensions
+name: Build Static PHP 8.5 (linux-aarch64) - Debug Extensions
 
 on:
   workflow_dispatch:
@@ -36,24 +36,16 @@ jobs:
             libreadline-dev libgmp-dev libicu-dev libldap2-dev libxslt1-dev \
             libyaml-dev libsnappy-dev libzstd-dev libevent-dev libenchant-2-dev \
             libtidy-dev libpcre2-dev libmemcached-dev libssh2-1-dev \
-            libmaxminddb-dev libprotobuf-dev protobuf-compiler \
-            libmagickwand-dev libpq-dev unixodbc-dev libodbc2 \
-            libsodium-dev libbrotli-dev liblz4-dev librdkafka-dev \
-            re2c autopoint gettext
+            libmaxminddb-dev libpq-dev unixodbc-dev libodbc2 \
+            libsodium-dev libbrotli-dev liblz4-dev re2c autopoint gettext
 
-      - name: Create craft.yml with your specified extensions
+      - name: Create craft.yml (minimal for testing - add your extensions gradually)
         run: |
           cat > craft.yml << 'EOF'
           php-version: "${{ github.event.inputs.php_version || '8.5' }}"
 
           extensions: >-
-            amqp apcu ast bcmath brotli bz2 calendar ctype curl dba dio dom ds
-            ev event exif ffi fileinfo filter ftp gd gettext gmp iconv igbinary
-            imap intl ldap libxml lz4 mbregex mbstring memcache memcached msgpack
-            mysqli mysqlnd opcache openssl pcntl pcov pdo pdo_mysql pdo_odbc pdo_pgsql
-            pdo_sqlite pgsql phar posix readline redis session shmop simdjson simplexml
-            snappy sockets sodium sqlite3 ssh2 sysvmsg sysvsem sysvshm tidy tokenizer
-            xml xmlreader xmlwriter xsl xz yaml zip zlib zstd
+            bcmath bz2 ctype curl dom exif fileinfo filter gd gettext gmp iconv intl mbstring mysqli mysqlnd opcache openssl pcntl pdo pdo_mysql pdo_sqlite phar posix readline session simplexml sockets sodium sqlite3 tokenizer xml xmlreader xmlwriter xsl zip zlib
 
           sapi:
             - cli
@@ -68,14 +60,13 @@ jobs:
         run: |
           ./spc doctor || true
 
-      - name: Safe clean old caches (prevent spc dangerous rm)
+      - name: Safe clean old caches
         run: |
           rm -rf source downloads buildroot || true
 
-      - name: Download sources and libs
+      - name: Download sources and libs (with debug)
         run: |
-          ./spc download all --with-php=${{ github.event.inputs.php_version || '8.5' }} --debug || true
-          # 加 --debug 看详细下载过程；|| true 容忍部分失败，继续尝试 craft
+          ./spc download all --with-php=${{ github.event.inputs.php_version || '8.5' }} --debug
 
       - name: Build static PHP
         run: |
