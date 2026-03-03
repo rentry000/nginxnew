@@ -36,10 +36,7 @@ jobs:
           tar -xzf openssl-3.3.2.tar.gz
 
           git clone https://github.com/maxmind/libmaxminddb.git
-          cd libmaxminddb
-          git fetch --tags
-          git checkout 1.13.2
-          cd ..
+          cd libmaxminddb && git fetch --tags && git checkout 1.13.2 && cd ..
 
           git clone https://github.com/leev/ngx_http_geoip2_module.git
 
@@ -69,20 +66,20 @@ jobs:
           echo " 8 bytes" > auto/types/size_t
           echo " little endian" > auto/endianness
 
-      - name: 🔨 Configure Nginx - 所有有效模块（已清理无效选项）
+      - name: 🔨 Configure Nginx - 所有模块（已彻底修复 CC）
         run: |
           cd nginx-1.28.2
 
           TOOLCHAIN=/opt/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64
           export PATH=$TOOLCHAIN/bin:$PATH
 
-          export CC="aarch64-linux-android28-clang --sysroot=$TOOLCHAIN/sysroot -target aarch64-linux-android28"
-          export AR="llvm-ar"
-          export RANLIB="llvm-ranlib"
-          export LD="ld.lld"
-          export STRIP="llvm-strip"
+          export CC=aarch64-linux-android28-clang
+          export AR=llvm-ar
+          export RANLIB=llvm-ranlib
+          export LD=ld.lld
+          export STRIP=llvm-strip
 
-          export CFLAGS="-Os -fPIC -fPIE -DNGX_HAVE_SCHED_SETAFFINITY=0"
+          export CFLAGS="-Os -fPIC -fPIE -DNGX_HAVE_SCHED_SETAFFINITY=0 -target aarch64-linux-android28 --sysroot=$TOOLCHAIN/sysroot -B$TOOLCHAIN/bin"
           export LDFLAGS="-static -pie -Wl,--gc-sections -Wl,--strip-all -fuse-ld=lld"
 
           ./configure \
@@ -123,7 +120,7 @@ jobs:
             --with-http_perl_module=dynamic \
             --with-stream_geoip_module=dynamic \
             --add-dynamic-module=../ngx_http_geoip2_module \
-            2>&1 | tee ../configure.log || (echo "❌ Configure 失败！真实错误原因如下："; tail -n 100 objs/config.log 2>/dev/null || tail -n 100 ../configure.log; exit 1)
+            2>&1 | tee ../configure.log || (echo "❌ Configure 失败！真实错误："; tail -n 100 objs/config.log 2>/dev/null || tail -n 100 ../configure.log; exit 1)
 
           ls -l Makefile objs/nginx objs/*.so 2>/dev/null || echo "关键文件缺失"
 
