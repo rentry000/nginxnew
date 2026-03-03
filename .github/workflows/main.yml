@@ -1,4 +1,4 @@
-name: Nginx Android arm64 Static Build - Simplified Debug
+name: Nginx Android arm64-v8a Static Build - Force Overrides
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: 准备环境 + NDK r29
+      - name: 准备 + NDK r29
         run: |
           sudo apt update
           sudo apt install -y build-essential wget unzip tree patch perl git
@@ -15,7 +15,7 @@ jobs:
           unzip -q ndk.zip -d /opt
           echo "ANDROID_NDK_ROOT=/opt/android-ndk-r29" >> $GITHUB_ENV
 
-      - name: 下载 Nginx + 核心依赖
+      - name: 下载源码
         run: |
           rm -rf nginx-* zlib-* pcre2-* openssl-* || true
           wget https://nginx.org/download/nginx-1.28.2.tar.gz
@@ -25,26 +25,51 @@ jobs:
           wget https://www.openssl.org/source/openssl-3.3.2.tar.gz && tar -xzf openssl-3.3.2.tar.gz
 
           ls -la nginx-1.28.2/configure
-          chmod +x nginx-1.28.2/configure
 
-      - name: 注入 stubs
+      - name: 强制覆盖所有 auto/types 测试（绕过所有编译检测）
         run: |
           cd nginx-1.28.2
+          chmod +x configure
+
           mkdir -p auto/types
+
+          # 覆盖 sizeof 测试
           cat > auto/types/sizeof << 'EOF'
           #!/bin/sh
           case "$1" in
             int|unsigned\ int) echo " 4 bytes" ;;
-            long|unsigned\ long|size_t|off_t|time_t|"void *") echo " 8 bytes" ;;
+            long|unsigned\ long) echo " 8 bytes" ;;
+            size_t|off_t|time_t|"void *") echo " 8 bytes" ;;
             "long long"|"unsigned long long") echo " 8 bytes" ;;
             *) echo " 8 bytes" ;;
           esac
           EOF
           chmod +x auto/types/sizeof
+
+          # uintptr / uintptr_t
           echo " 8 bytes" > auto/types/uintptr
+
+          # endianness
           echo " little endian" > auto/endianness
 
-      - name: Configure (简化版 - 只核心模块)
+          # uintptr_t size
+          echo " 8 bytes" > auto/types/uintptr_t
+
+          # pointer size
+          echo " 8 bytes" > auto/types/pointer
+
+          # long size
+          echo " 8 bytes" > auto/types/long
+
+          # int size
+          echo " 4 bytes" > auto/types/int
+
+          # size_t size
+          echo " 8 bytes" > auto/types/size_t
+
+          echo "所有常见 auto/types 测试已硬编码覆盖"
+
+      - name: Configure (最小化模块，先验证 Makefile)
         run: |
           cd nginx-1.28.2
 
@@ -57,8 +82,8 @@ jobs:
           export RANLIB="llvm-ranlib"
           export LD="ld.lld"
 
-          export CFLAGS="-Os -fPIC -fPIE"
-          export LDFLAGS="-static -pie -Wl,--gc-sections -fuse-ld=lld"
+          export CFLAGS="-Os -fPIC -fPIE -DNGX_HAVE_SCHED_SETAFFINITY=0 -DNGX_HAVE_GNU_CRYPT_R=1"
+          export LDFLAGS="-static -pie -Wl,--gc-sections -fuse-ld=lld -L$TOOLCHAIN/sysroot/usr/lib/aarch64-linux-android/28"
 
           ./configure \
             --prefix=/data/local/tmp/nginx \
@@ -75,14 +100,14 @@ jobs:
             --with-file-aio \
             2>&1 | tee ../configure.log || {
               echo "Configure 失败，查看日志："
-              cat objs/config.log 2>/dev/null | tail -n 80 || tail -n 80 ../configure.log
+              cat objs/config.log 2>/dev/null | tail -n 100 || tail -n 100 ../configure.log
               exit 1
             }
 
-          echo "Configure 成功检查："
-          ls -l Makefile objs/nginx || echo "Makefile 或 nginx 未生成"
+          echo "Makefile 检查："
+          ls -l Makefile objs/nginx 2>/dev/null || echo "Makefile 未生成！"
 
-      - name: Make + 提取
+      - name: Make
         run: |
           cd nginx-1.28.2
           make -j$(nproc) || exit 1
@@ -94,7 +119,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: nginx-debug-simplified
+          name: nginx-debug-force-stubs
           path: |
             configure.log
             nginx-1.28.2/objs/config.log
