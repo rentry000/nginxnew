@@ -1,4 +1,4 @@
-name: Build Nginx for Android arm64-v8a (NDK r29 - 手动修复 sizeof 最终版)
+name: Build Nginx for Android arm64-v8a (NDK r29 - qemu 最终根治版)
 
 on:
   workflow_dispatch:
@@ -17,16 +17,23 @@ jobs:
           find . -name "*.sh" -type f -exec chmod +x {} \;
           echo "✅ 仓库准备完成"
 
-      - name: 📦 安装依赖 + NDK r29
+      - name: 📦 安装依赖 + qemu-user-static（关键！解决 Exec format error）
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libssl-dev zlib1g-dev patch wget unzip tree
+          sudo apt-get install -y build-essential libssl-dev zlib1g-dev patch wget unzip tree \
+            qemu-user-static binfmt-support
+          # 确保 qemu-aarch64 可执行（GitHub runner 专用）
+          sudo update-binfmts --enable
+          echo "✅ qemu-user-static 已安装（aarch64 二进制可直接运行）"
+
+      - name: 📦 配置 NDK r29
+        run: |
           wget -q https://dl.google.com/android/repository/android-ndk-r29-linux.zip -O ndk.zip
           unzip -q ndk.zip -d /opt
           echo "ANDROID_NDK_ROOT=/opt/android-ndk-r29" >> $GITHUB_ENV
-          echo "✅ 依赖 + NDK 配置完成"
+          echo "✅ NDK 配置完成"
 
-      - name: 🛠️ 清理坏补丁（01 + 08）
+      - name: 🛠️ 清理损坏补丁（01 + 08）
         run: |
           cd nginx-android
           PATCH_DIR="src/nginx_patches"
@@ -40,96 +47,15 @@ jobs:
           ' _ {} \;
           echo "✅ 坏补丁已彻底清理 + patch 规范化完成"
 
-      - name: 🔨 第一阶段：运行原脚本（允许在 configure 处失败）
-        continue-on-error: true
+      - name: 🔨 构建（使用 qemu 让 sizeof 测试正常运行）
         run: |
           cd nginx-android
           export ANDROID_ABI=arm64-v8a
           export ANDROID_NDK_ROOT=/opt/android-ndk-r29
           export CFLAGS="${CFLAGS} -DNGX_HAVE_SCHED_SETAFFINITY=0"
-          ./scripts/build-android.sh 2>&1 | tee build.log || echo "⚠️  原脚本在 configure 阶段失败（预期），继续手动修复"
-
-      - name: 🩹 手动根治 sizeof / uintptr / endianness（核心修复）
-        run: |
-          cd nginx-android
-          
-          # 自动找到 nginx 源码目录（原脚本已解压并打好 02\~07 补丁）
-          NGINX_SRC=$(find . -maxdepth 3 -name "auto" -type d -path "*/nginx*" | head -n 1 | xargs dirname 2>/dev/null || echo "")
-          if [ -z "$NGINX_SRC" ]; then
-            echo "❌ 未找到 nginx 源码目录！"
-            exit 1
-          fi
-          echo "✅ 找到 nginx 源码目录: $NGINX_SRC"
-          cd "$NGINX_SRC"
-          
-          echo "🛠️ 强制写入 arm64-v8a LP64 sizeof stub..."
-          cat > auto/types/sizeof << 'STUB'
-          #!/bin/sh
-          ngx_type="$1"
-          case "$ngx_type" in
-            int|unsigned\ int)                 echo " 4 bytes" ;;
-            long|unsigned\ long|size_t|off_t|time_t|"void *") echo " 8 bytes" ;;
-            "long long"|"unsigned long long")  echo " 8 bytes" ;;
-            *)                                 echo " 8 bytes" ;;
-          esac
-          echo "✅ [手动修复] sizeof 已硬编码为 arm64-v8a LP64"
-          STUB
-                    chmod +x auto/types/sizeof
-          
-                    echo "🛠️ 写入 uintptr stub..."
-                    cat > auto/types/uintptr << 'STUB2'
-          #!/bin/sh
-          echo " 8 bytes"
-          echo "✅ [手动修复] uintptr 已硬编码为 arm64-v8a"
-          STUB2
-          chmod +x auto/types/uintptr
-
-          echo "🛠️ 写入 endianness（arm64 为 little endian）..."
-          echo " little endian" > auto/endianness
-
-          echo "✅ sizeof / uintptr / endianness 全部修复完成！"
-          ls -l auto/types/sizeof auto/types/uintptr auto/endianness
-
-      - name: 🔨 第二阶段：手动 Configure + Make + Install
-        run: |
-          cd nginx-android
-          
-          # 再次定位 nginx 源码目录
-          NGINX_SRC=$(find . -maxdepth 3 -name "auto" -type d -path "*/nginx*" | head -n 1 | xargs dirname)
-          cd "$NGINX_SRC"
-          
-          # 加载 Android toolchain（原脚本用的配置）
-          source ../scripts/android-config.sh arm64-v8a 2>/dev/null || true
-          
-          echo "🚀 开始手动 configure（使用原脚本相同的环境）..."
-          ./auto/configure \
-            --prefix=/data/local/tmp/nginx \
-            --with-cc="$CC" \
-            --with-ld-opt="-Wl,--gc-sections -Wl,--strip-all -static $LDFLAGS" \
-            --with-cc-opt="-Os -fdata-sections -ffunction-sections -DNGX_HAVE_SCHED_SETAFFINITY=0 $CFLAGS" \
-            --with-pcre=../build/install/arm64-v8a/pcre2 \
-            --with-zlib=../build/install/arm64-v8a/zlib \
-            --with-openssl=../build/install/arm64-v8a/openssl \
-            --with-http_ssl_module \
-            --with-http_v2_module \
-            --with-http_v3_module \
-            --with-http_gzip_static_module \
-            --with-stream \
-            --with-stream_ssl_module \
-            --with-threads \
-            --with-file-aio \
-            --with-poll_module \
-            --crossbuild=Linux:aarch64 \
-            2>&1 | tee -a ../../build.log || echo "configure 完成"
-
-          echo "🚀 开始 make..."
-          make -j2 2>&1 | tee -a ../../build.log
-
-          echo "🚀 安装到产物目录..."
-          mkdir -p ../../build/install/arm64-v8a
-          make install DESTDIR=../../build/install/arm64-v8a 2>&1 | tee -a ../../build.log
-
-          echo "✅ 手动构建 + 安装全部完成！"
+          set -exo pipefail
+          ./scripts/build-android.sh 2>&1 | tee build.log
+          echo "✅ 构建完成（日志已保存）"
 
       - name: 📤 上传产物与日志
         if: always()
@@ -144,4 +70,4 @@ jobs:
         if: always()
         run: |
           echo "=== 最后 60 行关键日志 ==="
-          tail -n 60 nginx-android/build.log | grep -A 30 -E "error|failed|sizeof|Exec|detect|int size|bytes|✅|🚀" || tail -n 50 nginx-android/build.log
+          tail -n 60 nginx-android/build.log | grep -A 30 -E "error|failed|sizeof|Exec|detect|int size|bytes|qemu|✅|🚀" || tail -n 50 nginx-android/build.log
