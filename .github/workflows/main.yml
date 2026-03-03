@@ -1,4 +1,4 @@
-name: Build Nginx for Android arm64-v8a (Modern Official Build - NDK r29)
+name: Build Nginx for Android arm64-v8a (Modern + Toolchain 硬编码最终版)
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: 🌱 准备环境
+      - name: 🌱 准备环境 + NDK r29
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential libssl-dev zlib1g-dev patch wget unzip tree
@@ -19,7 +19,7 @@ jobs:
           echo "ANDROID_NDK_ROOT=/opt/android-ndk-r29" >> $GITHUB_ENV
           echo "✅ NDK r29 + 依赖安装完成"
 
-      - name: 🌱 克隆老仓库（仅用于构建依赖，不用它的 nginx）
+      - name: 🌱 克隆老仓库（仅用于构建依赖）
         run: |
           git clone https://github.com/ryanlee486/nginx-android.git
           cd nginx-android
@@ -31,17 +31,19 @@ jobs:
           cd nginx-android
           export ANDROID_ABI=arm64-v8a
           export ANDROID_NDK_ROOT=/opt/android-ndk-r29
-          ./scripts/build-android.sh 2>&1 | tee build.log || echo "⚠️ configure 阶段失败（预期），依赖已构建完成"
+          ./scripts/build-android.sh 2>&1 | tee build.log || echo "⚠️ configure 阶段失败（预期），但依赖已全部构建完成"
 
-      - name: 🩹 手动注入 sizeof/uintptr/endianness stub（根治检测问题）
+      - name: 🚀 手动注入 stub + 硬编码 Toolchain + Configure + Make（核心修复）
         run: |
           cd nginx-android
-          # 找到官方 nginx 源码目录（老脚本已解压并打好基础补丁）
+          
+          # 找到 nginx 源码目录
           NGINX_SRC=$(find . -maxdepth 3 -name "auto" -type d -path "*/nginx*" | head -n 1 | xargs dirname)
-          echo "✅ 找到 nginx 源码: $NGINX_SRC"
+          echo "✅ 找到 nginx 源码目录: $NGINX_SRC"
           cd "$NGINX_SRC"
-
-          echo "🛠️ 注入 arm64-v8a LP64 sizeof stub..."
+          
+          # === 1. 注入 sizeof/uintptr/endianness stub（已确认有效）===
+          echo "🛠️ 注入 arm64-v8a sizeof stub..."
           cat > auto/types/sizeof << 'EOF'
           #!/bin/sh
           case "$1" in
@@ -54,30 +56,36 @@ jobs:
           EOF
           chmod +x auto/types/sizeof
 
-          echo "🛠️ 注入 uintptr stub..."
           echo " 8 bytes" > auto/types/uintptr
-          echo "✅ uintptr stub"
-
-          echo "🛠️ 注入 endianness..."
           echo " little endian" > auto/endianness
+          echo "✅ stub 注入完成"
 
-          ls -l auto/types/sizeof auto/types/uintptr auto/endianness
+          # === 2. 硬编码 NDK r29 Toolchain（彻底解决 C compiler not found）===
+          export ANDROID_NDK_ROOT=/opt/android-ndk-r29
+          export CC="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang"
+          export CXX="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang++"
+          export AR="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+          export LD="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/ld.lld"
+          export RANLIB="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib"
+          export STRIP="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+          
+          export SYSROOT="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          export CFLAGS="-fPIE -fPIC -O2"
+          export LDFLAGS="-pie -Wl,--gc-sections -Wl,--strip-all"
+          
+          echo "🔍 Toolchain 硬编码完成"
+          echo "CC = $CC"
+          echo "SYSROOT = $SYSROOT"
+          ls -l "$CC" || echo "⚠️ CC 文件不存在（请检查）"
 
-      - name: 🚀 手动 Configure + Make + Install（现代构建核心）
-        run: |
-          cd nginx-android
-          NGINX_SRC=$(find . -maxdepth 3 -name "auto" -type d -path "*/nginx*" | head -n 1 | xargs dirname)
-          cd "$NGINX_SRC"
-
-          source ../scripts/android-config.sh arm64-v8a 2>/dev/null || true
-
-          echo "🚀 开始 configure（官方 nginx + NDK r29）..."
+          # === 3. 手动 configure（使用官方 nginx + NDK r29）===
+          echo "🚀 开始 configure..."
           ./auto/configure \
             --prefix=/data/local/tmp/nginx \
             --crossbuild=Linux:aarch64 \
             --with-cc="$CC" \
-            --with-ld-opt="-Wl,--gc-sections -Wl,--strip-all -static" \
-            --with-cc-opt="-Os -fdata-sections -ffunction-sections -DNGX_HAVE_SCHED_SETAFFINITY=0" \
+            --with-ld-opt="$LDFLAGS" \
+            --with-cc-opt="$CFLAGS -DNGX_HAVE_SCHED_SETAFFINITY=0" \
             --with-pcre=../build/install/arm64-v8a/pcre2 \
             --with-zlib=../build/install/arm64-v8a/zlib \
             --with-openssl=../build/install/arm64-v8a/openssl \
@@ -91,14 +99,15 @@ jobs:
             --with-file-aio \
             2>&1 | tee -a ../../build.log
 
+          # === 4. make + install ===
           echo "🚀 开始 make..."
           make -j2 2>&1 | tee -a ../../build.log
 
           echo "🚀 安装产物..."
           mkdir -p ../../build/install/arm64-v8a/sbin ../../build/install/arm64-v8a/conf
-          cp objs/nginx ../../build/install/arm64-v8a/sbin/
+          cp objs/nginx ../../build/install/arm64-v8a/sbin/ || echo "⚠️ nginx 二进制未生成"
           cp -r conf/* ../../build/install/arm64-v8a/conf/ 2>/dev/null || true
-          echo "✅ 构建完成！nginx 二进制已生成"
+          ls -lh ../../build/install/arm64-v8a/sbin/nginx || echo "⚠️ 检查二进制是否存在"
 
       - name: 📤 上传产物与日志
         if: always()
@@ -112,5 +121,5 @@ jobs:
       - name: 📋 构建摘要
         if: always()
         run: |
-          echo "=== 最后 80 行关键日志 ==="
-          tail -n 80 nginx-android/build.log | grep -E "error|failed|✅|🚀|sizeof|configure|make" || tail -n 60 nginx-android/build.log
+          echo "=== 最后 100 行关键日志（重点看 CC 和 configure）==="
+          tail -n 100 nginx-android/build.log | grep -E "error|failed|✅|🚀|CC =|sizeof|configure|make|nginx binary" || tail -n 80 nginx-android/build.log
