@@ -76,7 +76,7 @@ jobs:
 
       - name: Download 其他依赖库（php-src 已存在，跳过查询）
         run: |
-          ./spc download all --with-php=8.5.2.tar.gz --ignore-cache-sources=php-src --debug
+          ./spc download all --with-php=8.5.2 --debug
 
       - name: Build static PHP
         run: |
