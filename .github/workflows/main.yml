@@ -114,11 +114,6 @@ jobs:
             --with-stream \
             --with-stream_ssl_module \
             --with-stream_realip_module \
-            --with-stream_return_module \
-            --with-stream_set_module \
-            --with-stream_upstream_hash_module \
-            --with-stream_upstream_least_conn_module \
-            --with-stream_upstream_random_module \
             --with-threads \
             --with-file-aio \
             --with-poll_module \
@@ -128,7 +123,7 @@ jobs:
             --with-http_perl_module=dynamic \
             --with-stream_geoip_module=dynamic \
             --add-dynamic-module=../ngx_http_geoip2_module \
-            2>&1 | tee ../configure.log || (echo "Configure 失败！"; tail -n 100 objs/config.log 2>/dev/null || tail -n 100 ../configure.log; exit 1)
+            2>&1 | tee ../configure.log || (echo "❌ Configure 失败！真实错误原因如下："; tail -n 100 objs/config.log 2>/dev/null || tail -n 100 ../configure.log; exit 1)
 
           ls -l Makefile objs/nginx objs/*.so 2>/dev/null || echo "关键文件缺失"
 
@@ -159,5 +154,5 @@ jobs:
         run: |
           echo "=== configure.log 最后 100 行 ==="
           tail -n 100 configure.log 2>/dev/null || echo "无日志"
-          echo "=== objs/config.log 最后 100 行 ==="
+          echo "=== objs/config.log 最后 100 行（关键！）==="
           tail -n 100 nginx-1.28.2/objs/config.log 2>/dev/null || echo "无 config.log"
