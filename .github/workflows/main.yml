@@ -1,4 +1,4 @@
-name: Build Latest Nginx Static Binary for Android arm64-v8a (NDK r29 - Debug Fixed)
+name: Build Latest Nginx Static Binary + Dynamic Modules for Android arm64-v8a (NDK r29 - Full + geoip2 + perl)
 
 on:
   workflow_dispatch:
@@ -13,30 +13,47 @@ jobs:
       - name: 🌱 准备环境 + NDK r29
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential wget unzip tree patch perl
+          sudo apt-get install -y build-essential wget unzip tree patch perl git libgd-dev libxslt1-dev
+
           wget -q https://dl.google.com/android/repository/android-ndk-r29-linux.zip -O ndk.zip
           unzip -q ndk.zip -d /opt
           echo "ANDROID_NDK_ROOT=/opt/android-ndk-r29" >> $GITHUB_ENV
 
-      - name: 📦 下载并验证源码
+      - name: 📦 下载 Nginx + 依赖 + geoip2 模块源码
         run: |
-          wget https://nginx.org/download/nginx-1.28.2.tar.gz || echo "wget nginx failed!"
-          tar -xzf nginx-1.28.2.tar.gz || echo "tar failed!"
-          ls -la nginx-1.28.2/  # 必须看到 auto/ conf/ src/ 等
-          ls -la nginx-1.28.2/auto/ | grep configure  # 确认 auto/configure 存在
+          # Nginx
+          wget https://nginx.org/download/nginx-1.28.2.tar.gz
+          tar -xzf nginx-1.28.2.tar.gz
+
+          # Zlib
+          wget https://zlib.net/zlib-1.3.2.tar.gz
+          tar -xzf zlib-1.3.2.tar.gz
+
+          # PCRE2
+          wget https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.44/pcre2-10.44.tar.gz
+          tar -xzf pcre2-10.44.tar.gz
+
+          # OpenSSL
+          wget https://www.openssl.org/source/openssl-3.3.2.tar.gz
+          tar -xzf openssl-3.3.2.tar.gz
+
+          # libmaxminddb (geoip2 需要)
+          git clone https://github.com/maxmind/libmaxminddb.git
+          cd libmaxminddb
+          git checkout v1.9.1  # 稳定版
+          cd ..
+
+          # ngx_http_geoip2_module (dynamic)
+          git clone https://github.com/leev/ngx_http_geoip2_module.git
+
+          ls -la nginx-1.28.2/auto/configure
 
       - name: 🩹 注入 stubs + 权限修复
         run: |
-          cd nginx-1.28.2 || exit 1
-          if [ ! -f auto/configure ]; then
-            echo "FATAL: auto/configure not found!"
-            ls -la auto/
-            exit 1
-          fi
+          cd nginx-1.28.2
           chmod +x auto/configure
-          echo "auto/configure permissions:" && ls -l auto/configure
+          ls -l auto/configure
 
-          # stubs
           cat > auto/types/sizeof << 'EOF'
           #!/bin/sh
           case "$1" in
@@ -47,10 +64,11 @@ jobs:
           esac
           EOF
           chmod +x auto/types/sizeof
+
           echo " 8 bytes" > auto/types/uintptr
           echo " little endian" > auto/endianness
 
-      - name: 🔨 Configure (简化版 + 诊断)
+      - name: 🔨 Configure Nginx - All Modules + geoip2 + perl dynamic
         run: |
           cd nginx-1.28.2
 
@@ -61,13 +79,13 @@ jobs:
           export AR="llvm-ar"
           export RANLIB="llvm-ranlib"
           export LD="ld.lld"
+          export STRIP="llvm-strip"
 
-          export CFLAGS="-Os -fPIC"
-          export LDFLAGS="-static -Wl,--gc-sections"
+          export CFLAGS="-Os -fPIC -fPIE -DNGX_HAVE_SCHED_SETAFFINITY=0"
+          export LDFLAGS="-static -pie -Wl,--gc-sections -Wl,--strip-all -fuse-ld=lld"
 
-          echo "Trying configure..."
           ./auto/configure \
-            --prefix=/tmp/nginx \
+            --prefix=/data/local/tmp/nginx \
             --with-cc="$CC" \
             --with-cc-opt="$CFLAGS" \
             --with-ld-opt="$LDFLAGS" \
@@ -75,34 +93,70 @@ jobs:
             --with-pcre=../pcre2-10.44 \
             --with-openssl=../openssl-3.3.2 \
             --with-http_ssl_module \
+            --with-http_v2_module \
+            --with-http_v3_module \
+            --with-http_gzip_static_module \
+            --with-http_stub_status_module \
+            --with-http_realip_module \
+            --with-http_addition_module \
+            --with-http_sub_module \
+            --with-http_dav_module \
+            --with-http_flv_module \
+            --with-http_mp4_module \
+            --with-http_gunzip_module \
+            --with-http_auth_request_module \
+            --with-http_random_index_module \
+            --with-http_secure_link_module \
+            --with-http_slice_module \
+            --with-http_auth_basic_module \
+            --with-http_charset_module \
+            --with-http_geoip_module=dynamic \
+            --with-http_image_filter_module=dynamic \
+            --with-http_xslt_module=dynamic \
+            --with-http_perl_module=dynamic \
+            --with-mail \
+            --with-mail_ssl_module \
             --with-stream \
+            --with-stream_ssl_module \
+            --with-stream_realip_module \
+            --with-stream_geoip_module=dynamic \
+            --with-stream_return_module \
+            --with-stream_set_module \
+            --with-stream_upstream_hash_module \
+            --with-stream_upstream_least_conn_module \
+            --with-stream_upstream_random_module \
             --with-threads \
-            || (echo "Configure FAILED! Dumping logs:"; cat objs/config.log 2>/dev/null || echo "No config.log"; tail -n 100 config.log 2>/dev/null; exit 1)
+            --with-file-aio \
+            --with-poll_module \
+            --with-select_module \
+            --add-dynamic-module=../ngx_http_geoip2_module \
+            --without-http_rewrite_module \
+            2>&1 | tee ../configure.log || (echo "Configure failed! Check config.log"; cat objs/config.log 2>/dev/null | tail -n 80; exit 1)
 
-          echo "Configure done, checking Makefile:"
-          ls -l Makefile objs/ || echo "Makefile/objs missing"
+          ls -l Makefile objs/*.so 2>/dev/null || echo "No dynamic modules generated"
 
-      - name: 🔨 Make
+      - name: 🔨 Make + 提取二进制 & 动态模块
         run: |
           cd nginx-1.28.2
           make -j$(nproc) || exit 1
-          mkdir -p ../build/install/arm64-v8a/sbin
-          cp objs/nginx ../build/install/arm64-v8a/sbin/ || echo "No nginx binary"
+          mkdir -p ../build/install/arm64-v8a/sbin ../build/install/arm64-v8a/modules ../build/install/arm64-v8a/conf
+          cp objs/nginx ../build/install/arm64-v8a/sbin/nginx
+          cp objs/*.so ../build/install/arm64-v8a/modules/ 2>/dev/null || echo "No .so modules (check if dynamic compiled)"
+          cp -r conf/* ../build/install/arm64-v8a/conf/
           file ../build/install/arm64-v8a/sbin/nginx
+          ls -lh ../build/install/arm64-v8a/modules/
 
-      - name: 📤 Upload
+      - name: 📤 上传所有产物
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: nginx-debug
+          name: nginx-arm64-all-dynamic-modules
           path: |
-            nginx-1.28.2/objs/config.log
             build/install/arm64-v8a/
+            configure.log
+            make.log
 
-      - name: 📋 Summary
+      - name: 📋 诊断输出
         if: always()
         run: |
-          echo "Key files:"
-          ls -l nginx-1.28.2/Makefile nginx-1.28.2/objs/nginx 2>/dev/null || true
-          echo "Last configure attempt log:"
-          tail -n 60 nginx-1.28.2/objs/config.log 2>/dev/null || echo "No log"
+          tail -n 80 configure.log 2>/dev/null
