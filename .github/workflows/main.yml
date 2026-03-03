@@ -42,7 +42,8 @@ jobs:
             libtidy-dev libpcre2-dev libmemcached-dev libssh2-1-dev \
             libmaxminddb-dev libprotobuf-dev protobuf-compiler \
             libmagickwand-dev libpq-dev unixodbc-dev libodbc2 \
-            libsodium-dev libbrotli-dev liblz4-dev librdkafka-dev
+            libsodium-dev libbrotli-dev liblz4-dev librdkafka-dev \
+            re2c autopoint  # 显式加 doctor 提示的两个，避免 auto-fix 下载
 
       - name: Create craft.yml (最大化支持的扩展列表)
         run: |
@@ -69,14 +70,20 @@ jobs:
 
           build-options:
             strip: true
-            # upx: true
           EOF
 
-      - name: Check environment and build static PHP
+      - name: Check environment with spc doctor
         run: |
-          ./spc doctor --auto-fix     # ← 这里改了：用 --auto-fix 自动修复依赖
+          ./spc doctor || true   # 允许非零退出（有时只是警告），继续构建
+          # 如果需要调试： ./spc doctor --debug
+
+      - name: Download sources and libs (force clean to avoid old cache issues)
+        run: |
           ./spc download all --clean --with-php=${{ github.event.inputs.php_version || '8.5' }}
-          ./spc craft --config craft.yml --arch aarch64
+
+      - name: Build static PHP
+        run: |
+          ./spc craft --config craft.yml --arch aarch64 --debug   # 加 --debug 看详细日志
 
       - name: Prepare artifacts
         run: |
