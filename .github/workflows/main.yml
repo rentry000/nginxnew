@@ -1,4 +1,4 @@
-name: Build Static PHP 8.5.4RC1 (use your exact tar.gz)
+name: Build Static PHP 8.5.3 (使用官方直接 tar.gz 绕过 503)
 
 on:
   workflow_dispatch:
@@ -26,7 +26,7 @@ jobs:
           chmod +x spc
           ./spc --version
 
-      - name: Install system dependencies
+      - name: Install build prerequisites
         run: |
           sudo apt-get update -y
           sudo apt-get install -y \
@@ -35,7 +35,7 @@ jobs:
             libbz2-dev libjpeg-dev libpng-dev libfreetype6-dev libonig-dev libzip-dev \
             libreadline-dev libgmp-dev libicu-dev libsodium-dev libbrotli-dev re2c autopoint gettext
 
-      - name: Create craft.yml（官方示例配置）
+      - name: Create craft.yml (官方示例配置)
         run: |
           cat > craft.yml << 'EOF'
           php-version: "${{ github.event.inputs.php_version || '8.5' }}"
@@ -55,20 +55,18 @@ jobs:
         run: |
           ./spc doctor || true
 
-      - name: Safe clean old caches
+      - name: Safe clean caches
         run: |
           rm -rf downloads buildroot || true
 
-      - name: 🔥 Manually download YOUR tar.gz and extract
+      - name: 手动下载官方 PHP 8.5.3 tar.gz（绕过 php.net 503）
         run: |
-          echo "=== 下载你指定的 PHP 8.5.4RC1 ==="
-          mkdir -p source
-          curl -L -# -o php-src.tar.gz https://downloads.php.net/\~daniels/php-8.5.4RC1.tar.gz
-          tar -xzf php-src.tar.gz -C source/ --strip-components=1
-          echo "提取完成！"
-          ls -la source/ | head -10
+          mkdir -p downloads
+          curl -L -o downloads/php-8.5.3.tar.gz https://www.php.net/distributions/php-8.5.3.tar.gz
+          echo "PHP 源码已下载完成（大小应为 \~23MB）"
+          ls -lh downloads/php-8.5.3.tar.gz
 
-      - name: Download other libraries (skip php-src query)
+      - name: Download 其他依赖库（php-src 已存在，自动跳过查询）
         run: |
           ./spc download all --with-php=8.5 --ignore-cache-sources=php-src --debug
 
@@ -80,11 +78,11 @@ jobs:
         run: |
           mkdir -p artifacts
           cp dist/* artifacts/ 2>/dev/null || true
-          ls -lh artifacts/ || echo "No files found"
+          ls -lh artifacts/
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: static-php-8.5.4RC1-linux-aarch64
+          name: static-php-8.5.3-aarch64
           path: artifacts/
           retention-days: 7
