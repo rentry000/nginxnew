@@ -1,4 +1,4 @@
-name: Build Static PHP (using official example config)
+name: Build Static PHP (official example + fallback)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
       php_version:
         description: 'PHP Version (8.1 \~ 8.5)'
         required: true
-        default: '8.4'  # 官方示例用 8.4
+        default: '8.5'  # 改成 8.5 优先
   push:
     branches: [ main ]
     paths:
@@ -14,7 +14,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04-arm  # aarch64 runner
+    runs-on: ubuntu-24.04-arm
 
     steps:
       - name: Checkout repository
@@ -26,7 +26,7 @@ jobs:
           chmod +x spc
           ./spc --version
 
-      - name: Install build prerequisites (minimal set for official extensions)
+      - name: Install build prerequisites
         run: |
           sudo apt-get update -y
           sudo apt-get install -y \
@@ -34,15 +34,13 @@ jobs:
             libxml2-dev libsqlite3-dev zlib1g-dev libcurl4-openssl-dev libssl-dev \
             libbz2-dev libjpeg-dev libpng-dev libfreetype6-dev libonig-dev libzip-dev \
             libreadline-dev libgmp-dev libicu-dev \
-            libsodium-dev libbrotli-dev re2c autopoint gettext
+            libsodium-dev libbrotli-dev re2c autopoint gettext git  # 加 git 支持 shallow-clone
 
-      - name: Create craft.yml using official example
+      - name: Create craft.yml (official example)
         run: |
           cat > craft.yml << 'EOF'
-          # PHP version support: 8.1, 8.2, 8.3, 8.4, 8.5
-          php-version: "${{ github.event.inputs.php_version || '8.4' }}"
+          php-version: "${{ github.event.inputs.php_version || '8.5' }}"
 
-          # Put your extension list here
           extensions: "apcu,bcmath,calendar,ctype,curl,dba,dom,exif,fileinfo,filter,gd,iconv,mbregex,mbstring,mysqli,mysqlnd,opcache,openssl,pcntl,pdo,pdo_mysql,pdo_sqlite,phar,posix,readline,redis,session,simplexml,sockets,sodium,sqlite3,tokenizer,xml,xmlreader,xmlwriter,xsl,zip,zlib"
 
           sapi:
@@ -54,17 +52,17 @@ jobs:
             prefer-pre-built: true
           EOF
 
-      - name: Check environment with spc doctor
+      - name: Check environment
         run: |
           ./spc doctor || true
 
-      - name: Safe clean old caches
+      - name: Safe clean caches
         run: |
           rm -rf source downloads buildroot || true
 
-      - name: Download sources and libs
+      - name: Download sources (with fallback shallow-clone)
         run: |
-          ./spc download all --with-php=${{ github.event.inputs.php_version || '8.4' }} --debug
+          ./spc download all --with-php=${{ github.event.inputs.php_version || '8.5' }} --shallow-clone --debug || true
 
       - name: Build static PHP
         run: |
@@ -74,11 +72,11 @@ jobs:
         run: |
           mkdir -p artifacts
           cp dist/* artifacts/ 2>/dev/null || true
-          ls -lh artifacts/ || echo "No files found in dist/"
+          ls -lh artifacts/
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: static-php-${{ github.event.inputs.php_version || '8.4' }}-linux-aarch64-official
+          name: static-php-${{ github.event.inputs.php_version || '8.5' }}-aarch64
           path: artifacts/
           retention-days: 7
