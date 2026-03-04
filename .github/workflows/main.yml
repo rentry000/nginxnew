@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go_version: ["1.23"]  # Good compatibility with recent Caddy & xcaddy
+        go_version: ["1.23"]
 
     steps:
       - name: Checkout code
@@ -26,8 +26,7 @@ jobs:
           wget https://github.com/caddyserver/xcaddy/releases/download/v0.4.5/xcaddy_0.4.5_linux_amd64.tar.gz
           tar -xzf xcaddy_0.4.5_linux_amd64.tar.gz
           chmod +x xcaddy
-          ls -l xcaddy
-          ./xcaddy version   # Should print xcaddy version
+          ./xcaddy version   # 只打印 xcaddy 版本，确认工具可用
 
       - name: Build Caddy v2.11.1 with Plugins for linux/arm64
         run: |
@@ -38,11 +37,11 @@ jobs:
               --with github.com/caddy-dns/route53@v1.6.0 \
               --output ./caddy-arm64
 
-      - name: Verify Build Output
+      - name: Show Build Result Info (optional, safe on amd64)
         run: |
-          file ./caddy-arm64          # Should show: ELF 64-bit LSB pie executable, ARM aarch64
-          ./caddy-arm64 version       # Should show Caddy v2.11.1 ... custom plugins
-          ./caddy-arm64 validate --config /dev/null || echo "Validate passed (empty config is fine)"
+          file ./caddy-arm64
+          ls -lh ./caddy-arm64
+          sha256sum ./caddy-arm64 || true
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
@@ -56,7 +55,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: ./caddy-arm64
-          tag_name: caddy-arm64-v$(./caddy-arm64 version | awk '{print $2}' | tr -d '\n\r')
+          tag_name: caddy-arm64-v$(./caddy-arm64 version 2>/dev/null | awk '{print $2}' | tr -d '\n\r' || echo "unknown")
           name: Custom Caddy ARM64 v2.11.1
           draft: false
           prerelease: false
@@ -67,3 +66,6 @@ jobs:
             - github.com/caddy-dns/route53@v1.6.0
             
             Built using xcaddy v0.4.5 on Go ${{ matrix.go_version }}
+            
+            Note: This is a cross-compiled binary for ARM64 (aarch64). 
+            Do not attempt to run it on x86_64 machines without emulation.
