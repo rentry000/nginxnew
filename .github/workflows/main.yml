@@ -1,4 +1,4 @@
-name: Build Nginx arm64-v8a Static for Android
+name: Build Nginx arm64-v8a Static for Android (Fixed CC)
 
 on:
   workflow_dispatch:
@@ -20,15 +20,31 @@ jobs:
           wget https://nginx.org/download/nginx-1.29.5.tar.gz
           tar -xzf nginx-1.29.5.tar.gz
 
+      - name: Create CC wrapper for Android flags
+        run: |
+          TOOLCHAIN=/opt/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64
+          cat > cc-wrapper << 'EOF'
+          #!/bin/bash
+          exec $TOOLCHAIN/bin/aarch64-linux-android28-clang \
+            -target aarch64-linux-android28 \
+            --sysroot=$TOOLCHAIN/sysroot \
+            -B$TOOLCHAIN/bin \
+            "$@"
+          EOF
+          chmod +x cc-wrapper
+
       - name: Build Nginx
         run: |
           cd nginx-1.29.5
           TOOLCHAIN=/opt/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64
           export PATH=$TOOLCHAIN/bin:$PATH
-          export CC=aarch64-linux-android28-clang
-          export AR=llvm-ar
-          export RANLIB=llvm-ranlib
-          export LD=ld.lld
+          export CC=$(pwd)/cc-wrapper
+          export AR=$TOOLCHAIN/bin/llvm-ar
+          export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
+          export LD=$TOOLCHAIN/bin/ld.lld
+
+          export CFLAGS="-Os -fPIC -fPIE"
+          export LDFLAGS="-static -pie -Wl,--gc-sections -Wl,--strip-all"
 
           ./configure \
             --prefix=/data/local/tmp/nginx \
@@ -39,8 +55,8 @@ jobs:
             --error-log-path=stderr \
             --http-log-path=access.log \
             --with-cc=$CC \
-            --with-cc-opt="-Os -fPIC -fPIE" \
-            --with-ld-opt="-static -pie -Wl,--gc-sections -Wl,--strip-all" \
+            --with-cc-opt="$CFLAGS" \
+            --with-ld-opt="$LDFLAGS" \
             --with-http_ssl_module \
             --with-http_v2_module \
             --with-http_v3_module \
@@ -49,12 +65,15 @@ jobs:
             --with-threads \
             --with-file-aio \
             --with-poll_module \
-            --without-http_rewrite_module
+            --without-http_rewrite_module \
+            --without-http_userid_module \
+            --without-http_geo_module \
+            --without-http_ssi_module
 
           make -j$(nproc)
 
       - name: Upload nginx binary
         uses: actions/upload-artifact@v4
         with:
-          name: nginx-arm64
+          name: nginx-arm64-static
           path: nginx-1.29.5/objs/nginx
