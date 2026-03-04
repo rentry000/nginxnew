@@ -1,85 +1,51 @@
-name: Build Nginx arm64-v8a Static for Android (Fixed Wrapper Path)
+name: Build Caddy with Plugins (arm64)
 
 on:
+  push:
+    paths:
+      - '.github/workflows/caddy-build.yml'
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ["1.20.x"]
+
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 【核心修复 1】：引入 QEMU，使 Ubuntu 能透明地“运行” Nginx 的 arm64 探测程序
-      - name: Set up QEMU for transparent execution
+      - name: Set up Go ${{ matrix.go-version }}
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ matrix.go-version }}
+
+      - name: Download xcaddy
         run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-user-static binfmt-support
-          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+          wget -q https://github.com/caddyserver/xcaddy/releases/download/v0.4.5/xcaddy_0.4.5_linux_arm64.tar.gz
+          tar -xzf xcaddy_0.4.5_linux_arm64.tar.gz
+          chmod +x xcaddy
+          sudo mv xcaddy /usr/local/bin/
 
-      - name: Download NDK r29
+      - name: Build Caddy with Plugins
         run: |
-          wget -q https://dl.google.com/android/repository/android-ndk-r29-linux.zip -O ndk.zip
-          unzip -q ndk.zip -d /opt
+          xcaddy build \
+            --with github.com/caddyserver/caddy-waf/v2 \
+            --with github.com/caddy-dns/route53@v0.6.0 \
+            --with github.com/lucaslorentz/caddy-docker-proxy/v2@v2.11.0 \
+            --output caddy-arm64 \
+            --target linux/arm64 \
+            --with github.com/caddy-contrib/caddy-webdav
 
-      - name: Download Nginx 1.29.5
+      - name: Verify Build
         run: |
-          wget https://nginx.org/download/nginx-1.29.5.tar.gz
-          tar -xzf nginx-1.29.5.tar.gz
+          ./caddy-arm64 list-modules | grep -E "waf|webdav|route53"
 
-      # 【核心修复 2】：修正 cc-wrapper 脚本内部的变量定义
-      - name: Create CC wrapper in /tmp
-        run: |
-          cat > /tmp/cc-wrapper << 'EOF'
-          #!/bin/bash
-          TOOLCHAIN=/opt/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64
-          exec $TOOLCHAIN/bin/aarch64-linux-android28-clang \
-            -target aarch64-linux-android28 \
-            --sysroot=$TOOLCHAIN/sysroot \
-            -B$TOOLCHAIN/bin \
-            "$@"
-          EOF
-          chmod +x /tmp/cc-wrapper
-
-      - name: Build Nginx
-        run: |
-          cd nginx-1.29.5
-          TOOLCHAIN=/opt/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64
-          export PATH=$TOOLCHAIN/bin:$PATH
-          export CC=/tmp/cc-wrapper
-          export AR=$TOOLCHAIN/bin/llvm-ar
-          export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
-          export LD=$TOOLCHAIN/bin/ld.lld
-
-          export CFLAGS="-Os -fPIC -fPIE"
-          # Android 静态编译特性
-          export LDFLAGS="-static -pie -Wl,--gc-sections -Wl,--strip-all"
-
-          ./configure \
-            --prefix=/data/local/tmp/nginx \
-            --sbin-path=nginx \
-            --conf-path=nginx.conf \
-            --pid-path=nginx.pid \
-            --lock-path=nginx.lock \
-            --error-log-path=stderr \
-            --http-log-path=access.log \
-            --with-cc=$CC \
-            --with-cc-opt="$CFLAGS" \
-            --with-ld-opt="$LDFLAGS" \
-            --with-http_ssl_module \
-            --with-http_v2_module \
-            --with-http_v3_module \
-            --with-stream \
-            --with-stream_ssl_module \
-            --with-threads \
-            --with-file-aio \
-            --with-poll_module \
-            --without-http_rewrite_module
-
-          make -j$(nproc)
-
-      - name: Upload nginx binary
+      - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nginx-arm64-static
-          path: nginx-1.29.5/objs/nginx
+          name: caddy-arm64
+          path: caddy-arm64
+          retention-days: 30
