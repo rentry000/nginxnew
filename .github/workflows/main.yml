@@ -51,7 +51,7 @@ jobs:
         ./caddy-arm64 validate-config --config /dev/null
 
     - name: Upload Artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: caddy-arm64-custom
         path: ./caddy-arm64
