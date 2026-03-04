@@ -20,11 +20,12 @@ jobs:
           wget https://nginx.org/download/nginx-1.29.5.tar.gz
           tar -xzf nginx-1.29.5.tar.gz
 
-      - name: Create CC wrapper in /tmp
+            - name: Create CC wrapper in /tmp
         run: |
-          TOOLCHAIN=/opt/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64
           cat > /tmp/cc-wrapper << 'EOF'
           #!/bin/bash
+          # 将 TOOLCHAIN 定义在封装脚本内部
+          TOOLCHAIN=/opt/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64
           exec $TOOLCHAIN/bin/aarch64-linux-android28-clang \
             -target aarch64-linux-android28 \
             --sysroot=$TOOLCHAIN/sysroot \
@@ -32,6 +33,7 @@ jobs:
             "$@"
           EOF
           chmod +x /tmp/cc-wrapper
+
 
       - name: Build Nginx
         run: |
