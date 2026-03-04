@@ -10,6 +10,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 【核心修复 1】：引入 QEMU，使 Ubuntu 能透明地“运行” Nginx 的 arm64 探测程序
+      - name: Set up QEMU for transparent execution
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static binfmt-support
+          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+
       - name: Download NDK r29
         run: |
           wget -q https://dl.google.com/android/repository/android-ndk-r29-linux.zip -O ndk.zip
@@ -20,11 +27,11 @@ jobs:
           wget https://nginx.org/download/nginx-1.29.5.tar.gz
           tar -xzf nginx-1.29.5.tar.gz
 
-            - name: Create CC wrapper in /tmp
+      # 【核心修复 2】：修正 cc-wrapper 脚本内部的变量定义
+      - name: Create CC wrapper in /tmp
         run: |
           cat > /tmp/cc-wrapper << 'EOF'
           #!/bin/bash
-          # 将 TOOLCHAIN 定义在封装脚本内部
           TOOLCHAIN=/opt/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64
           exec $TOOLCHAIN/bin/aarch64-linux-android28-clang \
             -target aarch64-linux-android28 \
@@ -33,7 +40,6 @@ jobs:
             "$@"
           EOF
           chmod +x /tmp/cc-wrapper
-
 
       - name: Build Nginx
         run: |
@@ -46,6 +52,7 @@ jobs:
           export LD=$TOOLCHAIN/bin/ld.lld
 
           export CFLAGS="-Os -fPIC -fPIE"
+          # Android 静态编译特性
           export LDFLAGS="-static -pie -Wl,--gc-sections -Wl,--strip-all"
 
           ./configure \
