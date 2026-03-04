@@ -20,7 +20,7 @@ jobs:
           wget https://nginx.org/download/nginx-1.29.5.tar.gz
           tar -xzf nginx-1.29.5.tar.gz
 
-      - name: Create CC wrapper in absolute path
+      - name: Create CC wrapper in /tmp
         run: |
           TOOLCHAIN=/opt/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64
           cat > /tmp/cc-wrapper << 'EOF'
@@ -38,7 +38,7 @@ jobs:
           cd nginx-1.29.5
           TOOLCHAIN=/opt/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64
           export PATH=$TOOLCHAIN/bin:$PATH
-          export CC=/tmp/cc-wrapper  # 使用绝对路径，避免相对路径失效
+          export CC=/tmp/cc-wrapper
           export AR=$TOOLCHAIN/bin/llvm-ar
           export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
           export LD=$TOOLCHAIN/bin/ld.lld
