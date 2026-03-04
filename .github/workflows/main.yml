@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go_version: ["1.23"]  # xcaddy 和 Caddy v2.11.1 兼容良好，建议用最新 Go
+        go_version: ["1.23"]  # Good compatibility with recent Caddy & xcaddy
 
     steps:
       - name: Checkout code
@@ -27,22 +27,22 @@ jobs:
           tar -xzf xcaddy_0.4.5_linux_amd64.tar.gz
           chmod +x xcaddy
           ls -l xcaddy
-          ./xcaddy version   # 验证 xcaddy 可用
+          ./xcaddy version   # Should print xcaddy version
 
-      - name: Build Caddy Latest (v2.11.1) with Plugins for ARM64
+      - name: Build Caddy v2.11.1 with Plugins for linux/arm64
         run: |
-          ./xcaddy build v2.11.1 \
-            --with github.com/fabriziosalmi/caddy-waf \
-            --with github.com/mholt/caddy-webdav \
-            --with github.com/caddy-dns/route53@v1.6.0 \
-            --output ./caddy-arm64 \
-            --platform linux/arm64
+          GOOS=linux GOARCH=arm64 \
+            ./xcaddy build v2.11.1 \
+              --with github.com/fabriziosalmi/caddy-waf \
+              --with github.com/mholt/caddy-webdav \
+              --with github.com/caddy-dns/route53@v1.6.0 \
+              --output ./caddy-arm64
 
       - name: Verify Build Output
         run: |
-          file ./caddy-arm64
-          ./caddy-arm64 version   # 应该显示类似 Caddy v2.11.1 with plugins...
-          ./caddy-arm64 validate --config /dev/null || echo "Validate passed (empty config OK)"
+          file ./caddy-arm64          # Should show: ELF 64-bit LSB pie executable, ARM aarch64
+          ./caddy-arm64 version       # Should show Caddy v2.11.1 ... custom plugins
+          ./caddy-arm64 validate --config /dev/null || echo "Validate passed (empty config is fine)"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
@@ -67,4 +67,3 @@ jobs:
             - github.com/caddy-dns/route53@v1.6.0
             
             Built using xcaddy v0.4.5 on Go ${{ matrix.go_version }}
-            Latest stable core: https://github.com/caddyserver/caddy/releases/tag/v2.11.1
