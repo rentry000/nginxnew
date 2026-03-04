@@ -49,7 +49,6 @@ jobs:
             --with-threads \
             --with-file-aio \
             --with-poll_module \
-            --with-http_fastcgi_module=no \  # 明确关闭（避免 invalid option），默认已开
             --without-http_rewrite_module
 
           make -j$(nproc)
