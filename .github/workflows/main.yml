@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go_version: [1.21.0]  # 固定 Go 版本
+        go_version: [1.26.0]  # 固定 Go 版本
 
     steps:
     - name: Checkout code
@@ -21,11 +21,20 @@ jobs:
       with:
         go-version: ${{ matrix.go_version }}
 
-    - name: Cache Go modules
+    - name: Initialize Go Module
+      run: |
+        go mod init caddy-custom  # 临时模块名，可自定义
+        go get github.com/caddyserver/caddy/v2  # 获取 Caddy 核心依赖
+        go mod tidy  # 生成 go.sum
+
+    # 缓存 Go 模块（修复键配置）
+    - name: Cache Go Modules
       uses: actions/cache@v4
       with:
-        path: ~/go/pkg/mod
-        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        path: |
+          ~/go/pkg/mod
+          ~/.cache/go-build
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.mod', '**/go.sum') }}
         restore-keys: |
           ${{ runner.os }}-go-
 
