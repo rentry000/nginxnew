@@ -1,4 +1,4 @@
-name: Build Custom Caddy ARM64
+name: Build Custom Caddy ARM64 (Latest v2.11.1)
 
 on:
   push:
@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go_version: ["1.23"]  # 建议使用当前稳定版，xcaddy 支持良好
+        go_version: ["1.23"]  # xcaddy 和 Caddy v2.11.1 兼容良好，建议用最新 Go
 
     steps:
       - name: Checkout code
@@ -27,12 +27,11 @@ jobs:
           tar -xzf xcaddy_0.4.5_linux_amd64.tar.gz
           chmod +x xcaddy
           ls -l xcaddy
-          ./xcaddy version   # 验证 xcaddy 是否能正常运行
+          ./xcaddy version   # 验证 xcaddy 可用
 
-      - name: Build Caddy with Plugins for ARM64
+      - name: Build Caddy Latest (v2.11.1) with Plugins for ARM64
         run: |
-          export CADDY_VERSION=v2.11.1   # 或 latest / v2
-          ./xcaddy build \
+          ./xcaddy build v2.11.1 \
             --with github.com/fabriziosalmi/caddy-waf \
             --with github.com/mholt/caddy-webdav \
             --with github.com/caddy-dns/route53@v1.6.0 \
@@ -42,13 +41,13 @@ jobs:
       - name: Verify Build Output
         run: |
           file ./caddy-arm64
-          ./caddy-arm64 version
-          ./caddy-arm64 validate --config /dev/null || echo "Validate passed (empty config is ok)"
+          ./caddy-arm64 version   # 应该显示类似 Caddy v2.11.1 with plugins...
+          ./caddy-arm64 validate --config /dev/null || echo "Validate passed (empty config OK)"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: caddy-arm64-custom
+          name: caddy-arm64-custom-v2.11.1
           path: ./caddy-arm64
           retention-days: 14
 
@@ -58,13 +57,14 @@ jobs:
         with:
           files: ./caddy-arm64
           tag_name: caddy-arm64-v$(./caddy-arm64 version | awk '{print $2}' | tr -d '\n\r')
-          name: Custom Caddy ARM64 ${{ steps.version.outputs.version }}
+          name: Custom Caddy ARM64 v2.11.1
           draft: false
           prerelease: false
           body: |
-            Custom build of Caddy for linux/arm64 with plugins:
-            - caddy-waf
-            - caddy-webdav
-            - caddy-dns/route53@v1.6.0
+            Custom build of **Caddy v2.11.1** for linux/arm64 with plugins:
+            - github.com/fabriziosalmi/caddy-waf
+            - github.com/mholt/caddy-webdav
+            - github.com/caddy-dns/route53@v1.6.0
             
-            Built with xcaddy v0.4.5 on Go ${{ matrix.go_version }}
+            Built using xcaddy v0.4.5 on Go ${{ matrix.go_version }}
+            Latest stable core: https://github.com/caddyserver/caddy/releases/tag/v2.11.1
