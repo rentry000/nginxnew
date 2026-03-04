@@ -1,4 +1,4 @@
-name: Build Nginx arm64-v8a Static (Android compatible)
+name: Build Nginx arm64-v8a Static for Android
 
 on:
   workflow_dispatch:
@@ -40,7 +40,7 @@ jobs:
             --http-log-path=access.log \
             --with-cc=$CC \
             --with-cc-opt="-Os -fPIC -fPIE" \
-            --with-ld-opt="-Wl,--gc-sections -Wl,--strip-all" \
+            --with-ld-opt="-static -pie -Wl,--gc-sections -Wl,--strip-all" \
             --with-http_ssl_module \
             --with-http_v2_module \
             --with-http_v3_module \
@@ -49,7 +49,7 @@ jobs:
             --with-threads \
             --with-file-aio \
             --with-poll_module \
-            --with-http_fastcgi_module \
+            --with-http_fastcgi_module=no \  # 明确关闭（避免 invalid option），默认已开
             --without-http_rewrite_module
 
           make -j$(nproc)
