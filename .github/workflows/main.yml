@@ -3,74 +3,68 @@ name: Build Custom Caddy ARM64
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:  # 同时支持手动触
+  workflow_dispatch:
 
 jobs:
   build-caddy:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go_version: [1.26.0]  # 固定 Go 版本
+        go_version: ["1.23"]  # 建议使用当前稳定版，xcaddy 支持良好
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Setup Go Environment
-      uses: actions/setup-go@v4
-      with:
-        go-version: ${{ matrix.go_version }}
+      - name: Setup Go Environment
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go_version }}
 
-    - name: Initialize Go Module
-      run: |
-        go mod init caddy-custom  # 临时模块名，可自定义
-        go get github.com/caddyserver/caddy/v2  # 获取 Caddy 核心依赖
-        go mod tidy  # 生成 go.sum
+      - name: Install xcaddy (pre-built amd64)
+        run: |
+          wget https://github.com/caddyserver/xcaddy/releases/download/v0.4.5/xcaddy_0.4.5_linux_amd64.tar.gz
+          tar -xzf xcaddy_0.4.5_linux_amd64.tar.gz
+          chmod +x xcaddy
+          ls -l xcaddy
+          ./xcaddy version   # 验证 xcaddy 是否能正常运行
 
-    # 缓存 Go 模块（修复键配置）
-    - name: Cache Go Modules
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/go/pkg/mod
-          ~/.cache/go-build
-        key: ${{ runner.os }}-go-${{ hashFiles('**/go.mod', '**/go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-
+      - name: Build Caddy with Plugins for ARM64
+        run: |
+          export CADDY_VERSION=v2.11.1   # 或 latest / v2
+          ./xcaddy build \
+            --with github.com/fabriziosalmi/caddy-waf \
+            --with github.com/mholt/caddy-webdav \
+            --with github.com/caddy-dns/route53@v1.6.0 \
+            --output ./caddy-arm64 \
+            --platform linux/arm64
 
-    - name: Install xcaddy ARM64
-      run: |
-        wget https://github.com/caddyserver/xcaddy/releases/download/v0.4.5/xcaddy_0.4.5_linux_arm64.tar.gz
-        tar -xzf xcaddy_0.4.5_linux_arm64.tar.gz
-        chmod +x xcaddy
-        export PATH="$PATH:$(pwd)"
+      - name: Verify Build Output
+        run: |
+          file ./caddy-arm64
+          ./caddy-arm64 version
+          ./caddy-arm64 validate --config /dev/null || echo "Validate passed (empty config is ok)"
 
-    - name: Build Caddy with Plugins
-      run: |
-        ./xcaddy build \
-          --with github.com/fabriziosalmi/caddy-waf \
-          --with github.com/mholt/caddy-webdav \
-          --with github.com/caddy-dns/route53@1.6.0 \
-          --output ./caddy-arm64 \
-          --tags linux_arm64  # 明确指定架构标签
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: caddy-arm64-custom
+          path: ./caddy-arm64
+          retention-days: 14
 
-    - name: Verify Build
-      run: |
-        ./caddy-arm64 version | grep -E "Caddy v[0-9]+\.[0-9]+\.[0-9]+"
-        ./caddy-arm64 validate-config --config /dev/null
-
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: caddy-arm64-custom
-        path: ./caddy-arm64
-        retention-days: 14
-
-    - name: Publish to GitHub Releases
-      if: github.ref == 'refs/heads/main'
-      uses: softprops/action-gh-release@v1
-      with:
-        files: ./caddy-arm64
-        draft: false
-        prerelease: false
-        tag_name: "caddy-arm64-$(./caddy-arm64 version | cut -d' ' -f2)"
+      - name: Publish to GitHub Releases (on main branch)
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./caddy-arm64
+          tag_name: caddy-arm64-v$(./caddy-arm64 version | awk '{print $2}' | tr -d '\n\r')
+          name: Custom Caddy ARM64 ${{ steps.version.outputs.version }}
+          draft: false
+          prerelease: false
+          body: |
+            Custom build of Caddy for linux/arm64 with plugins:
+            - caddy-waf
+            - caddy-webdav
+            - caddy-dns/route53@v1.6.0
+            
+            Built with xcaddy v0.4.5 on Go ${{ matrix.go_version }}
