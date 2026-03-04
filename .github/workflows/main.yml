@@ -1,85 +1,61 @@
-name: Build Static PHP 8.5.2 (直接 craft，使用本地 php-src)
+name: Build Nginx arm64-v8a Static (Android compatible)
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
-    paths:
-      - 'craft.yml'
 
 jobs:
   build:
-    runs-on: ubuntu-24.04-arm
-
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download prebuilt spc binary (nightly aarch64)
+      - name: Download NDK r29
         run: |
-          curl -fsSL -o spc https://dl.static-php.dev/static-php-cli/spc-bin/nightly/spc-linux-aarch64
-          chmod +x spc
-          ./spc --version
+          wget -q https://dl.google.com/android/repository/android-ndk-r29-linux.zip -O ndk.zip
+          unzip -q ndk.zip -d /opt
 
-      - name: Install build prerequisites
+      - name: Download Nginx 1.29.5
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y \
-            binutils bison flex libtool autoconf automake make patch pkg-config git \
-            libxml2-dev libsqlite3-dev zlib1g-dev libcurl4-openssl-dev libssl-dev \
-            libbz2-dev libjpeg-dev libpng-dev libfreetype6-dev libonig-dev libzip-dev \
-            libreadline-dev libgmp-dev libicu-dev libsodium-dev libbrotli-dev \
-            re2c autopoint gettext
+          wget https://nginx.org/download/nginx-1.29.5.tar.gz
+          tar -xzf nginx-1.29.5.tar.gz
 
-      - name: Create craft.yml (官方示例配置)
+      - name: Build Nginx
         run: |
-          cat > craft.yml << 'EOF'
-          php-version: "8.5.2"
+          cd nginx-1.29.5
+          TOOLCHAIN=/opt/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64
+          export PATH=$TOOLCHAIN/bin:$PATH
+          export CC=aarch64-linux-android28-clang
+          export AR=llvm-ar
+          export RANLIB=llvm-ranlib
+          export LD=ld.lld
 
-          extensions: "apcu,bcmath,calendar,ctype,curl,dba,dom,exif,fileinfo,filter,gd,iconv,mbregex,mbstring,mysqli,mysqlnd,opcache,openssl,pcntl,pdo,pdo_mysql,pdo_sqlite,phar,posix,readline,redis,session,simplexml,sockets,sodium,sqlite3,tokenizer,xml,xmlreader,xmlwriter,xsl,zip,zlib"
+          ./configure \
+            --prefix=/data/local/tmp/nginx \
+            --sbin-path=nginx \
+            --conf-path=nginx.conf \
+            --pid-path=nginx.pid \
+            --lock-path=nginx.lock \
+            --error-log-path=stderr \
+            --http-log-path=access.log \
+            --with-cc=$CC \
+            --with-cc-opt="-Os -fPIC -fPIE" \
+            --with-ld-opt="-Wl,--gc-sections -Wl,--strip-all" \
+            --with-http_ssl_module \
+            --with-http_v2_module \
+            --with-http_v3_module \
+            --with-stream \
+            --with-stream_ssl_module \
+            --with-threads \
+            --with-file-aio \
+            --with-poll_module \
+            --with-http_fastcgi_module \
+            --without-http_rewrite_module
 
-          sapi:
-            - cli
-            - micro
-            - fpm
+          make -j$(nproc)
 
-          download-options:
-            prefer-pre-built: true
-          EOF
-
-      - name: Check environment
-        run: |
-          ./spc doctor || true
-
-      - name: Safe clean caches (保留 source/php-src)
-        run: |
-          rm -rf downloads buildroot || true
-
-      - name: 手动下载并解压官方 PHP 8.5.2 到 source/php-src
-        run: |
-          mkdir -p source/php-src downloads
-          echo "下载官方 PHP 8.5.2 tar.gz..."
-          curl -L -o downloads/php-8.5.2.tar.gz https://downloads.php.net/\~daniels/php-8.5.4RC1.tar.gz
-          echo "检查文件大小（应 \~23MB）："
-          ls -lh downloads/php-8.5.2.tar.gz
-          echo "解压到 source/php-src/ ..."
-          tar -xzf downloads/php-8.5.2.tar.gz -C source/php-src --strip-components=1
-          echo "PHP 源码已准备好，目录结构预览："
-          ls -lh source/php-src | head -n 10
-
-      - name: 直接构建 static PHP（craft 会使用本地 php-src，跳过查询）
-        run: |
-          ./spc craft --debug
-
-      - name: Prepare artifacts
-        run: |
-          mkdir -p artifacts
-          cp dist/* artifacts/ 2>/dev/null || true
-          ls -lh artifacts/ || echo "dist 目录为空或不存在"
-
-      - name: Upload Artifacts
+      - name: Upload nginx binary
         uses: actions/upload-artifact@v4
         with:
-          name: static-php-8.5.2-linux-aarch64
-          path: artifacts/
-          retention-days: 7
+          name: nginx-arm64
+          path: nginx-1.29.5/objs/nginx
