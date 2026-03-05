@@ -40,7 +40,7 @@ jobs:
               --with github.com/caddyserver/cache-handler \
               --with github.com/caddy-dns/cloudflare \
               --with github.com/caddy-dns/duckdns \
-              --with github.com/greenpau/caddy-security \
+              --with github.com/greenpau/caddy-security \   # ← 替换旧的 jwt/portal
               --with github.com/mholt/caddy-l4 \
               --with github.com/caddyserver/nginx-adapter \
               --with github.com/caddyserver/ntlm-transport \
@@ -57,8 +57,6 @@ jobs:
               --with github.com/mastercactapus/caddy2-proxyprotocol \
               --with github.com/sjtug/caddy2-filter \
               --with github.com/lucaslorentz/caddy-docker-proxy/v2 \
-              --with github.com/greenpau/caddy-auth-jwt \
-              --with github.com/greenpau/caddy-auth-portal \
               --with github.com/caddyserver/circuitbreaker \
               --with github.com/caddyserver/jsonc \
               --with github.com/caddyserver/json5 \
