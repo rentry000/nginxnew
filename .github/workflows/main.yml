@@ -34,7 +34,6 @@ jobs:
           GOARCH: arm64
         run: |
           ./xcaddy build v2.11.1 \
-            --with github.com/fabriziosalmi/caddy-waf \
             --with github.com/mholt/caddy-webdav \
             --with github.com/caddy-dns/route53@v1.6.0 \
             --with github.com/caddyserver/replace-response \
