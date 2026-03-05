@@ -56,7 +56,7 @@ jobs:
               --with github.com/kirsch33/realip \
               --with github.com/mastercactapus/caddy2-proxyprotocol \
               --with github.com/sjtug/caddy2-filter \
-              --with github.com/lucaslorentz/caddy-docker-proxy \
+              --with github.com/lucaslorentz/caddy-docker-proxy/v2 \
               --with github.com/greenpau/caddy-auth-jwt \
               --with github.com/greenpau/caddy-auth-portal \
               --with github.com/caddyserver/circuitbreaker \
@@ -66,8 +66,8 @@ jobs:
               --with github.com/serfriz/caddy-security-headers \
               --with github.com/RussellLuo/caddy-ext \
               --output ./caddy-arm64
-              
-      - name: Show Build Result Info (optional, safe on amd64)
+
+      - name: Show Build Result Info (optional, safe on amd64 host)
         run: |
           file ./caddy-arm64
           ls -lh ./caddy-arm64
@@ -85,17 +85,53 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: ./caddy-arm64
-          tag_name: caddy-arm64-v$(./caddy-arm64 version 2>/dev/null | awk '{print $2}' | tr -d '\n\r' || echo "unknown")
+          tag_name: caddy-arm64-v$(./caddy-arm64 version --short 2>/dev/null | tr -d '\n\r' || echo "unknown")
           name: Custom Caddy ARM64 v2.11.1
           draft: false
           prerelease: false
           body: |
-            Custom build of **Caddy v2.11.1** for linux/arm64 with plugins:
+            Custom cross-compiled build of **Caddy v2.11.1** for linux/arm64 (aarch64) with many popular plugins.
+
+            **Included plugins:**
             - github.com/fabriziosalmi/caddy-waf
             - github.com/mholt/caddy-webdav
             - github.com/caddy-dns/route53@v1.6.0
-            
-            Built using xcaddy v0.4.5 on Go ${{ matrix.go_version }}
-            
-            Note: This is a cross-compiled binary for ARM64 (aarch64). 
-            Do not attempt to run it on x86_64 machines without emulation.
+            - github.com/caddyserver/replace-response
+            - github.com/caddyserver/transform-encoder
+            - github.com/caddyserver/cache-handler
+            - github.com/caddy-dns/cloudflare
+            - github.com/caddy-dns/duckdns
+            - github.com/greenpau/caddy-security
+            - github.com/mholt/caddy-l4
+            - github.com/caddyserver/nginx-adapter
+            - github.com/caddyserver/ntlm-transport
+            - github.com/mholt/caddy-dynamicdns
+            - github.com/sagikazarmark/caddy-fs-s3
+            - github.com/ueffel/caddy-brotli
+            - github.com/corazawaf/coraza-caddy/v2
+            - github.com/mholt/caddy-ratelimit
+            - github.com/invzhi/caddy-docker-upstreams
+            - github.com/hslatman/caddy-crowdsec-bouncer
+            - github.com/mholt/caddy-events-exec
+            - github.com/caddyserver/forwardproxy
+            - github.com/kirsch33/realip
+            - github.com/mastercactapus/caddy2-proxyprotocol
+            - github.com/sjtug/caddy2-filter
+            - github.com/lucaslorentz/caddy-docker-proxy/v2   ← Docker labels 自动反向代理支持
+            - github.com/greenpau/caddy-auth-jwt
+            - github.com/greenpau/caddy-auth-portal
+            - github.com/caddyserver/circuitbreaker
+            - github.com/caddyserver/jsonc
+            - github.com/caddyserver/json5
+            - github.com/WeidiDeng/caddy-prometheus
+            - github.com/serfriz/caddy-security-headers
+            - github.com/RussellLuo/caddy-ext
+
+            Built with xcaddy v0.4.5 on Go ${{ matrix.go_version }}.
+
+            **Usage notes:**
+            - This binary is for ARM64 only (Raspberry Pi 4/5, AWS Graviton, Apple M1/M2 via emulation 等).
+            - For Docker usage with caddy-docker-proxy: use CMD ["caddy", "docker-proxy", "--watch"] 或类似。
+            - Check SHA256: `sha256sum caddy-arm64` after download.
+
+            Latest caddy-docker-proxy integration uses v2.11.0 (compatible with Caddy 2.11.1).
