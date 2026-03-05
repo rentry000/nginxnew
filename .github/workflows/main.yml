@@ -50,7 +50,7 @@ jobs:
             --with github.com/sagikazarmark/caddy-fs-s3 \
             --with github.com/ueffel/caddy-brotli \
             --with github.com/corazawaf/coraza-caddy/v2 \
-            --with github.com/mholt/caddy-ratelimit \
+            --with github.com/mholt/caddy-ratelimit \   # ← 这里！使用 mholt 的 rate limit 插件（推荐替换旧的）
             --with github.com/invzhi/caddy-docker-upstreams \
             --with github.com/hslatman/caddy-crowdsec-bouncer \
             --with github.com/mholt/caddy-events-exec \
@@ -62,8 +62,8 @@ jobs:
             --with github.com/caddyserver/circuitbreaker \
             --with github.com/caddyserver/jsonc-adapter \
             --with github.com/caddyserver/json5-adapter \
-            --with github.com/RussellLuo/caddy-ext \
-            --output ./caddy-arm64   # 已移除 --with github.com/WeidiDeng/caddy-prometheus
+            --with github.com/serfriz/caddy-security-headers \
+            --output ./caddy-arm64   # 如果你想保留 RussellLuo 的，可额外加 --with github.com/RussellLuo/caddy-ext/ratelimit 但不必要
 
       - name: Show Build Result Info
         run: |
@@ -89,9 +89,9 @@ jobs:
           prerelease: false
           body: |
             Custom cross-compiled Caddy v2.11.1 for linux/arm64 (aarch64).
-            Built with xcaddy v0.4.5 on Go ${{ matrix.go_version }}.
+            Built with xcaddy v0.4.5 on Go ${{ matrix.go_version }} using GOOS=linux GOARCH=arm64.
 
-            **Included plugins:** (Prometheus metrics 使用 Caddy 官方内置，无需额外插件)
+            **Included plugins:**
             - github.com/fabriziosalmi/caddy-waf
             - github.com/mholt/caddy-webdav
             - github.com/caddy-dns/route53@v1.6.0
@@ -108,7 +108,7 @@ jobs:
             - github.com/sagikazarmark/caddy-fs-s3
             - github.com/ueffel/caddy-brotli
             - github.com/corazawaf/coraza-caddy/v2
-            - github.com/mholt/caddy-ratelimit
+            - github.com/mholt/caddy-ratelimit   ← Rate limiting (HTTP requests, distributed support)
             - github.com/invzhi/caddy-docker-upstreams
             - github.com/hslatman/caddy-crowdsec-bouncer
             - github.com/mholt/caddy-events-exec
@@ -121,6 +121,17 @@ jobs:
             - github.com/caddyserver/jsonc-adapter
             - github.com/caddyserver/json5-adapter
             - github.com/serfriz/caddy-security-headers
-            - github.com/RussellLuo/caddy-ext
 
-            **Monitoring:** Use Caddy's built-in Prometheus metrics (enable with `metrics` directive in global options or per-site).
+            **Rate Limit Usage Example (Caddyfile):**
+            ```
+            rate_limit {
+                zone myzone {
+                    key    {remote_host}
+                    events 100
+                    window 1m
+                }
+            }
+            ```
+            See full docs: https://github.com/mholt/caddy-ratelimit
+
+            This should build successfully now — previous invalid root path replaced.
