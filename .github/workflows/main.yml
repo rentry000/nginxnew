@@ -28,7 +28,7 @@ jobs:
           chmod +x xcaddy
           ./xcaddy version   # 只打印 xcaddy 版本，确认工具可用
 
-      - name: Build Custom Caddy v2.11.1 ARM64 - Full Featured
+      - name: Build Custom Caddy ARM64
         run: |
           GOOS=linux GOARCH=arm64 \
             ./xcaddy build v2.11.1 \
@@ -36,7 +36,7 @@ jobs:
               --with github.com/mholt/caddy-webdav \
               --with github.com/caddy-dns/route53@v1.6.0 \
               --with github.com/caddyserver/replace-response \
-              --with github.com/caddyserver/transform-encoder \   # ← 这里修正！（删掉 format-encoder）
+              --with github.com/caddyserver/transform-encoder \
               --with github.com/caddyserver/cache-handler \
               --with github.com/caddy-dns/cloudflare \
               --with github.com/caddy-dns/duckdns \
