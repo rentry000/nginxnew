@@ -28,13 +28,49 @@ jobs:
           chmod +x xcaddy
           ./xcaddy version   # 只打印 xcaddy 版本，确认工具可用
 
-      - name: Build Caddy v2.11.1 with Plugins for linux/arm64
+      - name: Build Custom Caddy v2.11.1 ARM64 - Full Featured
         run: |
           GOOS=linux GOARCH=arm64 \
             ./xcaddy build v2.11.1 \
               --with github.com/fabriziosalmi/caddy-waf \
               --with github.com/mholt/caddy-webdav \
               --with github.com/caddy-dns/route53@v1.6.0 \
+              --with github.com/caddyserver/caddy/v2/modules/caddyhttp/php \
+              --with github.com/caddyserver/replace-response \
+              --with github.com/caddyserver/transform-encoder \
+              --with github.com/caddyserver/cache-handler \
+              --with github.com/caddy-dns/cloudflare \
+              --with github.com/caddy-dns/duckdns \
+              --with github.com/greenpau/caddy-security \
+              --with github.com/mholt/caddy-l4 \
+              --with github.com/caddyserver/nginx-adapter \
+              --with github.com/caddyserver/ntlm-transport \
+              --with github.com/mholt/caddy-dynamicdns \
+              --with github.com/caddyserver/format-encoder \
+              --with github.com/caddyserver/fs-s3 \
+              --with github.com/ueffel/caddy-brotli \
+              --with github.com/corazawaf/coraza-caddy/v2 \
+              --with github.com/mholt/caddy-ratelimit \
+              --with github.com/invzhi/caddy-docker-upstreams \
+              --with github.com/abiosoft/caddy-git \
+              --with github.com/hslatman/caddy-crowdsec-bouncer \
+              --with github.com/mholt/caddy-events-exec \
+              --with github.com/caddyserver/forwardproxy \
+              --with github.com/kirsch33/realip \
+              --with github.com/mastercactapus/caddy2-proxyprotocol \
+              --with github.com/sjtug/caddy2-filter \
+              # 以下为新增/推荐补充（2025-2026 仍活跃或高实用价值）
+              --with github.com/lucaslorentz/caddy-docker-proxy \
+              --with github.com/greenpau/caddy-auth-jwt \
+              --with github.com/greenpau/caddy-auth-portal \
+              --with github.com/caddyserver/circuitbreaker \
+              --with github.com/caddyserver/jsonc \
+              --with github.com/caddyserver/json5 \
+              --with github.com/WeidiDeng/caddy-prometheus \
+              --with github.com/caddyserver/tls.dns.providers.cloudflare@latest \
+              --with github.com/caddyserver/tls.dns.providers.googlecloud@latest \
+              --with github.com/serfriz/caddy-security-headers \
+              --with github.com/RussellLuo/caddy-ext \
               --output ./caddy-arm64
 
       - name: Show Build Result Info (optional, safe on amd64)
