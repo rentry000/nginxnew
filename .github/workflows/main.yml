@@ -32,6 +32,7 @@ jobs:
         env:
           GOOS: linux
           GOARCH: arm64
+          GOPROXY: https://goproxy.cn,direct   # 加速国内下载
         run: |
           ./xcaddy build v2.11.1 \
             --with github.com/mholt/caddy-webdav \
@@ -63,14 +64,16 @@ jobs:
             --with github.com/SakuraHentai/caddy-dynamic-routing \
             --with github.com/ysicing/caddy2-geocn \
             --with github.com/steffenbusch/caddy-placeholder-dump \
-            --with github.com/caddyserver/crowdsec@latest --with github.com/chaitin/t1k-go@master --replace github.com/caddyserver/crowdsec=https://gitee.com/mirrors/caddyserver_crowdsec.git \
             --with github.com/hslatman/caddy-crowdsec-bouncer/appsec \
             --with github.com/hslatman/caddy-crowdsec-bouncer/layer4 \
             --with github.com/hslatman/caddy-crowdsec-bouncer/http \
             --with github.com/oauth2-proxy/oauth2-proxy/v7@latest \
             --with ghcr.io/jasonlovesdoggo/caddy-defender:latest \
-            --output ./caddy-arm64   # 已移除 --with github.com/serfriz/caddy-security-headers（用内置 header 指令替代）
-
+            --with github.com/W0n9/caddy_waf_t1k \
+            --with github.com/chaitin/t1k-go@master \
+            --replace github.com/caddyserver/crowdsec=github.com/gitee/mirrors/caddyserver_crowdsec \
+            --output ./caddy-arm64
+            
       - name: Show Build Result Info
         run: |
           file ./caddy-arm64 || true
