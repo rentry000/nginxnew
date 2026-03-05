@@ -28,13 +28,15 @@ jobs:
           chmod +x xcaddy
           ./xcaddy version
 
-      - name: Clone CrowdSec Mirror from Gitee
-        run: |
-          git clone https://gitee.com/mirrors/caddyserver_crowdsec.git crowdsec-mirror
-          cd crowdsec-mirror
-          git checkout master || true
-          cd ..
-
+      - name: Clone CrowdSec Plugin
+       env:
+         GH_TOKEN: ${{ secrets.GITHUB_TOKEN_PAT }}  # 使用你添加的 secret
+       run: |
+         git clone https://$GH_TOKEN@github.com/hslatman/caddy-crowdsec-bouncer.git crowdsec-plugin
+         cd crowdsec-plugin
+         git checkout main || true
+         cd ..
+      
       - name: Build Custom Caddy ARM64
         env:
           GOOS: linux
@@ -79,7 +81,7 @@ jobs:
             --with ghcr.io/jasonlovesdoggo/caddy-defender:latest \
             --with github.com/W0n9/caddy_waf_t1k \
             --with github.com/chaitin/t1k-go@master \
-            --replace github.com/caddyserver/crowdsec=./crowdsec-mirror \
+            --replace github.com/hslatman/caddy-crowdsec-bouncer=./crowdsec-plugin \
             --output ./caddy-arm64
             
       - name: Show Build Result Info
