@@ -29,43 +29,47 @@ jobs:
           ./xcaddy version   # 只打印 xcaddy 版本，确认工具可用
 
       - name: Build Custom Caddy ARM64
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          # 如果某些插件需要 CGO（如有 C 依赖），可加 CGO_ENABLED=1
+          # CGO_ENABLED: 1
         run: |
-          GOOS=linux GOARCH=arm64 \
-            ./xcaddy build v2.11.1 \
-              --with github.com/fabriziosalmi/caddy-waf \
-              --with github.com/mholt/caddy-webdav \
-              --with github.com/caddy-dns/route53@v1.6.0 \
-              --with github.com/caddyserver/replace-response \
-              --with github.com/caddyserver/transform-encoder \
-              --with github.com/caddyserver/cache-handler \
-              --with github.com/caddy-dns/cloudflare \
-              --with github.com/caddy-dns/duckdns \
-              --with github.com/greenpau/caddy-security \   # ← 替换旧的 jwt/portal
-              --with github.com/mholt/caddy-l4 \
-              --with github.com/caddyserver/nginx-adapter \
-              --with github.com/caddyserver/ntlm-transport \
-              --with github.com/mholt/caddy-dynamicdns \
-              --with github.com/sagikazarmark/caddy-fs-s3 \
-              --with github.com/ueffel/caddy-brotli \
-              --with github.com/corazawaf/coraza-caddy/v2 \
-              --with github.com/mholt/caddy-ratelimit \
-              --with github.com/invzhi/caddy-docker-upstreams \
-              --with github.com/hslatman/caddy-crowdsec-bouncer \
-              --with github.com/mholt/caddy-events-exec \
-              --with github.com/caddyserver/forwardproxy \
-              --with github.com/kirsch33/realip \
-              --with github.com/mastercactapus/caddy2-proxyprotocol \
-              --with github.com/sjtug/caddy2-filter \
-              --with github.com/lucaslorentz/caddy-docker-proxy/v2 \
-              --with github.com/caddyserver/circuitbreaker \
-              --with github.com/caddyserver/jsonc \
-              --with github.com/caddyserver/json5 \
-              --with github.com/WeidiDeng/caddy-prometheus \
-              --with github.com/serfriz/caddy-security-headers \
-              --with github.com/RussellLuo/caddy-ext \
-              --output ./caddy-arm64
+          ./xcaddy build v2.11.1 \
+            --with github.com/fabriziosalmi/caddy-waf \
+            --with github.com/mholt/caddy-webdav \
+            --with github.com/caddy-dns/route53@v1.6.0 \
+            --with github.com/caddyserver/replace-response \
+            --with github.com/caddyserver/transform-encoder \
+            --with github.com/caddyserver/cache-handler \
+            --with github.com/caddy-dns/cloudflare \
+            --with github.com/caddy-dns/duckdns \
+            --with github.com/greenpau/caddy-security \
+            --with github.com/mholt/caddy-l4 \
+            --with github.com/caddyserver/nginx-adapter \
+            --with github.com/caddyserver/ntlm-transport \
+            --with github.com/mholt/caddy-dynamicdns \
+            --with github.com/sagikazarmark/caddy-fs-s3 \
+            --with github.com/ueffel/caddy-brotli \
+            --with github.com/corazawaf/coraza-caddy/v2 \
+            --with github.com/mholt/caddy-ratelimit \
+            --with github.com/invzhi/caddy-docker-upstreams \
+            --with github.com/hslatman/caddy-crowdsec-bouncer \
+            --with github.com/mholt/caddy-events-exec \
+            --with github.com/caddyserver/forwardproxy \
+            --with github.com/kirsch33/realip \
+            --with github.com/mastercactapus/caddy2-proxyprotocol \
+            --with github.com/sjtug/caddy2-filter \
+            --with github.com/lucaslorentz/caddy-docker-proxy/v2 \
+            --with github.com/caddyserver/circuitbreaker \
+            --with github.com/caddyserver/jsonc \
+            --with github.com/caddyserver/json5 \
+            --with github.com/WeidiDeng/caddy-prometheus \
+            --with github.com/serfriz/caddy-security-headers \
+            --with github.com/RussellLuo/caddy-ext \
+            --output ./caddy-arm64
 
-      - name: Show Build Result Info (optional, safe on amd64 host)
+      - name: Show Build Result Info (optional, safe on amd64)
         run: |
           file ./caddy-arm64
           ls -lh ./caddy-arm64
@@ -99,7 +103,7 @@ jobs:
             - github.com/caddyserver/cache-handler
             - github.com/caddy-dns/cloudflare
             - github.com/caddy-dns/duckdns
-            - github.com/greenpau/caddy-security
+            - github.com/greenpau/caddy-security   ← 认证/授权/JWT/门户 等功能（取代旧 jwt/portal）
             - github.com/mholt/caddy-l4
             - github.com/caddyserver/nginx-adapter
             - github.com/caddyserver/ntlm-transport
@@ -116,8 +120,6 @@ jobs:
             - github.com/mastercactapus/caddy2-proxyprotocol
             - github.com/sjtug/caddy2-filter
             - github.com/lucaslorentz/caddy-docker-proxy/v2   ← Docker labels 自动反向代理支持
-            - github.com/greenpau/caddy-auth-jwt
-            - github.com/greenpau/caddy-auth-portal
             - github.com/caddyserver/circuitbreaker
             - github.com/caddyserver/jsonc
             - github.com/caddyserver/json5
@@ -125,11 +127,11 @@ jobs:
             - github.com/serfriz/caddy-security-headers
             - github.com/RussellLuo/caddy-ext
 
-            Built with xcaddy v0.4.5 on Go ${{ matrix.go_version }}.
+            Built with xcaddy v0.4.5 on Go ${{ matrix.go_version }} using GOOS=linux GOARCH=arm64.
 
             **Usage notes:**
-            - This binary is for ARM64 only (Raspberry Pi 4/5, AWS Graviton, Apple M1/M2 via emulation 等).
-            - For Docker usage with caddy-docker-proxy: use CMD ["caddy", "docker-proxy", "--watch"] 或类似。
-            - Check SHA256: `sha256sum caddy-arm64` after download.
+            - This binary is for ARM64 only (Raspberry Pi 4/5, AWS Graviton, etc.).
+            - For caddy-docker-proxy: run with `caddy docker-proxy --watch` 等。
+            - Check SHA256 after download: `sha256sum caddy-arm64`
 
-            Latest caddy-docker-proxy integration uses v2.11.0 (compatible with Caddy 2.11.1).
+            Latest integration: caddy-docker-proxy v2.11.0 (2026-03), caddy-security v1.1.36 (2026-03).
