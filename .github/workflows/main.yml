@@ -62,7 +62,6 @@ jobs:
             --with github.com/caddyserver/circuitbreaker \
             --with github.com/caddyserver/jsonc-adapter \
             --with github.com/caddyserver/json5-adapter \
-            --with github.com/serfriz/caddy-security-headers \
             --with github.com/RussellLuo/caddy-ext \
             --output ./caddy-arm64   # 已移除 --with github.com/WeidiDeng/caddy-prometheus
 
