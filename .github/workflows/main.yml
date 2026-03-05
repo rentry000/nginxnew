@@ -61,7 +61,7 @@ jobs:
             --with github.com/lucaslorentz/caddy-docker-proxy/v2 \
             --with github.com/caddyserver/circuitbreaker \
             --with github.com/caddyserver/jsonc-adapter \
-            --with github.com/caddyserver/json5 \
+            --with github.com/caddyserver/json5-adapter \   # ← 改这里！原 json5 → json5-adapter
             --with github.com/WeidiDeng/caddy-prometheus \
             --with github.com/serfriz/caddy-security-headers \
             --with github.com/RussellLuo/caddy-ext \
@@ -119,15 +119,16 @@ jobs:
             - github.com/sjtug/caddy2-filter
             - github.com/lucaslorentz/caddy-docker-proxy/v2   ← Docker labels 自动反向代理支持
             - github.com/caddyserver/circuitbreaker
-            - github.com/caddyserver/jsonc-adapter   ← JSON with Comments 支持（修复原 jsonc 错误）
-            - github.com/caddyserver/json5
+            - github.com/caddyserver/jsonc-adapter   ← JSON with Comments 支持
+            - github.com/caddyserver/json5-adapter   ← JSON5 支持（trailing commas, comments 等）
             - github.com/WeidiDeng/caddy-prometheus
             - github.com/serfriz/caddy-security-headers
             - github.com/RussellLuo/caddy-ext
 
             Built with xcaddy v0.4.5 on Go ${{ matrix.go_version }} using GOOS=linux GOARCH=arm64.
 
-            **Usage notes for JSONC:**
-            - Run with `--adapter jsonc` for .jsonc config files (supports // comments).
+            **Config Adapter Usage:**
+            - For JSONC: caddy run --config config.jsonc --adapter jsonc
+            - For JSON5: caddy run --config config.json5 --adapter json5
 
-            Latest: Compatible with Caddy v2.11.1 (March 2026 patches).
+            Latest compatible (March 2026): jsonc-adapter & json5-adapter from official caddyserver repos.
