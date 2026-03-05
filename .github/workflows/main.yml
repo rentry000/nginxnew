@@ -32,6 +32,8 @@ jobs:
         env:
           GOOS: linux
           GOARCH: arm64
+          # Optional: if any plugin requires CGO (rare in your list, but add if needed later)
+          # CGO_ENABLED: 1
         run: |
           ./xcaddy build v2.11.1 \
             --with github.com/fabriziosalmi/caddy-waf \
@@ -50,7 +52,7 @@ jobs:
             --with github.com/sagikazarmark/caddy-fs-s3 \
             --with github.com/ueffel/caddy-brotli \
             --with github.com/corazawaf/coraza-caddy/v2 \
-            --with github.com/mholt/caddy-ratelimit \   # ← 这里！使用 mholt 的 rate limit 插件（推荐替换旧的）
+            --with github.com/mholt/caddy-ratelimit \
             --with github.com/invzhi/caddy-docker-upstreams \
             --with github.com/hslatman/caddy-crowdsec-bouncer \
             --with github.com/mholt/caddy-events-exec \
@@ -63,7 +65,7 @@ jobs:
             --with github.com/caddyserver/jsonc-adapter \
             --with github.com/caddyserver/json5-adapter \
             --with github.com/serfriz/caddy-security-headers \
-            --output ./caddy-arm64   # 如果你想保留 RussellLuo 的，可额外加 --with github.com/RussellLuo/caddy-ext/ratelimit 但不必要
+            --output ./caddy-arm64
 
       - name: Show Build Result Info
         run: |
