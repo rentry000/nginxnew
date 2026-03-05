@@ -26,7 +26,7 @@ jobs:
           wget https://github.com/caddyserver/xcaddy/releases/download/v0.4.5/xcaddy_0.4.5_linux_amd64.tar.gz
           tar -xzf xcaddy_0.4.5_linux_amd64.tar.gz
           chmod +x xcaddy
-          ./xcaddy version   # 只打印 xcaddy 版本，确认工具可用
+          ./xcaddy version   # 确认工具可用
 
       - name: Build Custom Caddy ARM64
         env:
@@ -61,16 +61,16 @@ jobs:
             --with github.com/lucaslorentz/caddy-docker-proxy/v2 \
             --with github.com/caddyserver/circuitbreaker \
             --with github.com/caddyserver/jsonc-adapter \
-            --with github.com/caddyserver/json5-adapter \   # ← 改这里！原 json5 → json5-adapter
+            --with github.com/caddyserver/json5-adapter \
             --with github.com/WeidiDeng/caddy-prometheus \
             --with github.com/serfriz/caddy-security-headers \
             --with github.com/RussellLuo/caddy-ext \
             --output ./caddy-arm64
 
-      - name: Show Build Result Info (optional, safe on amd64)
+      - name: Show Build Result Info
         run: |
-          file ./caddy-arm64
-          ls -lh ./caddy-arm64
+          file ./caddy-arm64 || true
+          ls -lh ./caddy-arm64 || true
           sha256sum ./caddy-arm64 || true
 
       - name: Upload Artifact
@@ -90,45 +90,6 @@ jobs:
           draft: false
           prerelease: false
           body: |
-            Custom cross-compiled build of **Caddy v2.11.1** for linux/arm64 (aarch64) with many popular plugins.
-
-            **Included plugins:**
-            - github.com/fabriziosalmi/caddy-waf
-            - github.com/mholt/caddy-webdav
-            - github.com/caddy-dns/route53@v1.6.0
-            - github.com/caddyserver/replace-response
-            - github.com/caddyserver/transform-encoder
-            - github.com/caddyserver/cache-handler
-            - github.com/caddy-dns/cloudflare
-            - github.com/caddy-dns/duckdns
-            - github.com/greenpau/caddy-security   ← 认证/授权/JWT/门户 等功能
-            - github.com/mholt/caddy-l4
-            - github.com/caddyserver/nginx-adapter
-            - github.com/caddyserver/ntlm-transport
-            - github.com/mholt/caddy-dynamicdns
-            - github.com/sagikazarmark/caddy-fs-s3
-            - github.com/ueffel/caddy-brotli
-            - github.com/corazawaf/coraza-caddy/v2
-            - github.com/mholt/caddy-ratelimit
-            - github.com/invzhi/caddy-docker-upstreams
-            - github.com/hslatman/caddy-crowdsec-bouncer
-            - github.com/mholt/caddy-events-exec
-            - github.com/caddyserver/forwardproxy
-            - github.com/kirsch33/realip
-            - github.com/mastercactapus/caddy2-proxyprotocol
-            - github.com/sjtug/caddy2-filter
-            - github.com/lucaslorentz/caddy-docker-proxy/v2   ← Docker labels 自动反向代理支持
-            - github.com/caddyserver/circuitbreaker
-            - github.com/caddyserver/jsonc-adapter   ← JSON with Comments 支持
-            - github.com/caddyserver/json5-adapter   ← JSON5 支持（trailing commas, comments 等）
-            - github.com/WeidiDeng/caddy-prometheus
-            - github.com/serfriz/caddy-security-headers
-            - github.com/RussellLuo/caddy-ext
-
-            Built with xcaddy v0.4.5 on Go ${{ matrix.go_version }} using GOOS=linux GOARCH=arm64.
-
-            **Config Adapter Usage:**
-            - For JSONC: caddy run --config config.jsonc --adapter jsonc
-            - For JSON5: caddy run --config config.json5 --adapter json5
-
-            Latest compatible (March 2026): jsonc-adapter & json5-adapter from official caddyserver repos.
+            Custom cross-compiled Caddy v2.11.1 for linux/arm64 (aarch64).
+            Built with xcaddy v0.4.5 on Go ${{ matrix.go_version }}.
+            Plugins list as above in build step.
