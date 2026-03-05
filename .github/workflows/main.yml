@@ -63,7 +63,7 @@ jobs:
             --with github.com/SakuraHentai/caddy-dynamic-routing \
             --with github.com/ysicing/caddy2-geocn \
             --with github.com/steffenbusch/caddy-placeholder-dump \
-            --with github.com/caddyserver/crowdsec \
+            --with github.com/caddyserver/crowdsec@latest --with github.com/chaitin/t1k-go@master --replace github.com/caddyserver/crowdsec=https://gitee.com/mirrors/caddyserver_crowdsec.git \
             --with github.com/hslatman/caddy-crowdsec-bouncer/appsec \
             --with github.com/hslatman/caddy-crowdsec-bouncer/layer4 \
             --with github.com/hslatman/caddy-crowdsec-bouncer/http \
