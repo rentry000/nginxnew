@@ -62,10 +62,9 @@ jobs:
             --with github.com/caddyserver/circuitbreaker \
             --with github.com/caddyserver/jsonc-adapter \
             --with github.com/caddyserver/json5-adapter \
-            --with github.com/WeidiDeng/caddy-prometheus \
             --with github.com/serfriz/caddy-security-headers \
             --with github.com/RussellLuo/caddy-ext \
-            --output ./caddy-arm64
+            --output ./caddy-arm64   # 已移除 --with github.com/WeidiDeng/caddy-prometheus
 
       - name: Show Build Result Info
         run: |
@@ -92,4 +91,37 @@ jobs:
           body: |
             Custom cross-compiled Caddy v2.11.1 for linux/arm64 (aarch64).
             Built with xcaddy v0.4.5 on Go ${{ matrix.go_version }}.
-            Plugins list as above in build step.
+
+            **Included plugins:** (Prometheus metrics 使用 Caddy 官方内置，无需额外插件)
+            - github.com/fabriziosalmi/caddy-waf
+            - github.com/mholt/caddy-webdav
+            - github.com/caddy-dns/route53@v1.6.0
+            - github.com/caddyserver/replace-response
+            - github.com/caddyserver/transform-encoder
+            - github.com/caddyserver/cache-handler
+            - github.com/caddy-dns/cloudflare
+            - github.com/caddy-dns/duckdns
+            - github.com/greenpau/caddy-security
+            - github.com/mholt/caddy-l4
+            - github.com/caddyserver/nginx-adapter
+            - github.com/caddyserver/ntlm-transport
+            - github.com/mholt/caddy-dynamicdns
+            - github.com/sagikazarmark/caddy-fs-s3
+            - github.com/ueffel/caddy-brotli
+            - github.com/corazawaf/coraza-caddy/v2
+            - github.com/mholt/caddy-ratelimit
+            - github.com/invzhi/caddy-docker-upstreams
+            - github.com/hslatman/caddy-crowdsec-bouncer
+            - github.com/mholt/caddy-events-exec
+            - github.com/caddyserver/forwardproxy
+            - github.com/kirsch33/realip
+            - github.com/mastercactapus/caddy2-proxyprotocol
+            - github.com/sjtug/caddy2-filter
+            - github.com/lucaslorentz/caddy-docker-proxy/v2
+            - github.com/caddyserver/circuitbreaker
+            - github.com/caddyserver/jsonc-adapter
+            - github.com/caddyserver/json5-adapter
+            - github.com/serfriz/caddy-security-headers
+            - github.com/RussellLuo/caddy-ext
+
+            **Monitoring:** Use Caddy's built-in Prometheus metrics (enable with `metrics` directive in global options or per-site).
