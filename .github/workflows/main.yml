@@ -29,9 +29,9 @@ jobs:
           ./xcaddy version
 
       - name: Clone CrowdSec Plugin
-       env:
-         GH_TOKEN: ${{ secrets.GITHUB_TOKEN_PAT }}  # 使用你添加的 secret
-       run: |
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN_PAT }}  # 使用你添加的 secret
+        run: |
          git clone https://$GH_TOKEN@github.com/hslatman/caddy-crowdsec-bouncer.git crowdsec-plugin
          cd crowdsec-plugin
          git checkout main || true
