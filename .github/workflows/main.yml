@@ -32,8 +32,6 @@ jobs:
         env:
           GOOS: linux
           GOARCH: arm64
-          # 如果某些插件需要 CGO（如有 C 依赖），可加 CGO_ENABLED=1
-          # CGO_ENABLED: 1
         run: |
           ./xcaddy build v2.11.1 \
             --with github.com/fabriziosalmi/caddy-waf \
@@ -62,7 +60,7 @@ jobs:
             --with github.com/sjtug/caddy2-filter \
             --with github.com/lucaslorentz/caddy-docker-proxy/v2 \
             --with github.com/caddyserver/circuitbreaker \
-            --with github.com/caddyserver/jsonc \
+            --with github.com/caddyserver/jsonc-adapter \
             --with github.com/caddyserver/json5 \
             --with github.com/WeidiDeng/caddy-prometheus \
             --with github.com/serfriz/caddy-security-headers \
@@ -103,7 +101,7 @@ jobs:
             - github.com/caddyserver/cache-handler
             - github.com/caddy-dns/cloudflare
             - github.com/caddy-dns/duckdns
-            - github.com/greenpau/caddy-security   ← 认证/授权/JWT/门户 等功能（取代旧 jwt/portal）
+            - github.com/greenpau/caddy-security   ← 认证/授权/JWT/门户 等功能
             - github.com/mholt/caddy-l4
             - github.com/caddyserver/nginx-adapter
             - github.com/caddyserver/ntlm-transport
@@ -121,7 +119,7 @@ jobs:
             - github.com/sjtug/caddy2-filter
             - github.com/lucaslorentz/caddy-docker-proxy/v2   ← Docker labels 自动反向代理支持
             - github.com/caddyserver/circuitbreaker
-            - github.com/caddyserver/jsonc
+            - github.com/caddyserver/jsonc-adapter   ← JSON with Comments 支持（修复原 jsonc 错误）
             - github.com/caddyserver/json5
             - github.com/WeidiDeng/caddy-prometheus
             - github.com/serfriz/caddy-security-headers
@@ -129,9 +127,7 @@ jobs:
 
             Built with xcaddy v0.4.5 on Go ${{ matrix.go_version }} using GOOS=linux GOARCH=arm64.
 
-            **Usage notes:**
-            - This binary is for ARM64 only (Raspberry Pi 4/5, AWS Graviton, etc.).
-            - For caddy-docker-proxy: run with `caddy docker-proxy --watch` 等。
-            - Check SHA256 after download: `sha256sum caddy-arm64`
+            **Usage notes for JSONC:**
+            - Run with `--adapter jsonc` for .jsonc config files (supports // comments).
 
-            Latest integration: caddy-docker-proxy v2.11.0 (2026-03), caddy-security v1.1.36 (2026-03).
+            Latest: Compatible with Caddy v2.11.1 (March 2026 patches).
