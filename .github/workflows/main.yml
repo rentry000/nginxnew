@@ -77,7 +77,7 @@ jobs:
             --with github.com/hslatman/caddy-crowdsec-bouncer/appsec \
             --with github.com/hslatman/caddy-crowdsec-bouncer/layer4 \
             --with github.com/hslatman/caddy-crowdsec-bouncer/http \
-            --with github.com/oauth2-proxy/oauth2-proxy/v7@latest \
+            # --with github.com/oauth2-proxy/oauth2-proxy/v7@latest \
             --with pkg.jsn.cam/caddy-defender@v0.10.0 \
             # --with github.com/W0n9/caddy_waf_t1k \
             # --with github.com/chaitin/t1k-go@v1.5.0 \
