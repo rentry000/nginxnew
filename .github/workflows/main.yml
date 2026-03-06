@@ -32,11 +32,25 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN_PAT }}  # 使用你添加的 secret
         run: |
-         git clone https://$GH_TOKEN@github.com/hslatman/caddy-crowdsec-bouncer.git crowdsec-plugin
-         cd crowdsec-plugin
-         git checkout main || true
-         cd ..
-      
+          git clone https://$GH_TOKEN@github.com/hslatman/caddy-crowdsec-bouncer.git crowdsec-plugin
+          cd crowdsec-plugin
+          git checkout main || true
+          cd ..
+
+      - name: Clone W0n9/caddy_waf_t1k and chaitin/t1k-go Locally
+        run: |
+          # 克隆 caddy_waf_t1k
+          git clone https://github.com/W0n9/caddy_waf_t1k.git caddy_waf_t1k
+          cd caddy_waf_t1k
+          git checkout master || true
+          cd ..
+
+          # 克隆 chaitin/t1k-go
+          git clone https://github.com/chaitin/t1k-go.git t1k-go
+          cd t1k-go
+          git checkout master || true
+          cd ..
+
       - name: Build Custom Caddy ARM64
         env:
           GOOS: linux
@@ -77,13 +91,12 @@ jobs:
             --with github.com/hslatman/caddy-crowdsec-bouncer/appsec \
             --with github.com/hslatman/caddy-crowdsec-bouncer/layer4 \
             --with github.com/hslatman/caddy-crowdsec-bouncer/http \
-            # --with github.com/oauth2-proxy/oauth2-proxy/v7@latest \
             --with pkg.jsn.cam/caddy-defender@v0.10.0 \
-            # --with github.com/W0n9/caddy_waf_t1k \
-            # --with github.com/chaitin/t1k-go@v1.5.0 \
+            --replace github.com/W0n9/caddy_waf_t1k=./caddy_waf_t1k \
+            --replace github.com/chaitin/t1k-go=./t1k-go \
             --replace github.com/hslatman/caddy-crowdsec-bouncer=./crowdsec-plugin \
             --output ./caddy-arm64
-            
+
       - name: Show Build Result Info
         run: |
           file ./caddy-arm64 || true
@@ -111,7 +124,6 @@ jobs:
             Built with xcaddy v0.4.5 on Go ${{ matrix.go_version }}.
 
             **Included plugins:** (Security headers 使用 Caddy 内置 `header` 指令，无需额外插件)
-            - github.com/fabriziosalmi/caddy-waf
             - github.com/mholt/caddy-webdav
             - github.com/caddy-dns/route53@v1.6.0
             - github.com/caddyserver/replace-response
@@ -133,12 +145,13 @@ jobs:
             - github.com/mholt/caddy-events-exec
             - github.com/caddyserver/forwardproxy
             - github.com/kirsch33/realip
-            - github.com/mastercactapus/caddy2-proxyprotocol
             - github.com/sjtug/caddy2-filter
             - github.com/lucaslorentz/caddy-docker-proxy/v2
             - github.com/caddyserver/circuitbreaker
             - github.com/caddyserver/jsonc-adapter
             - github.com/caddyserver/json5-adapter
+            - github.com/W0n9/caddy_waf_t1k (local)
+            - github.com/chaitin/t1k-go (local)
+            - pkg.jsn.cam/caddy-defender@v0.10.0
 
-            **Security Headers:** Use built-in `header` directive in Caddyfile (examples in previous messages).
-            This build should now complete without module path errors.
+            This build uses local replace for t1k-related plugins to avoid pseudo-version errors.
