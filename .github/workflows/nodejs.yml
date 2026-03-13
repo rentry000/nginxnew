@@ -19,33 +19,33 @@ jobs:
           ref: ${{ github.event.inputs.node_version }}
           fetch-depth: 1
 
-      - name: 配置交叉编译全局环境变量
+      - name: 配置编译环境
         run: |
+          # 1. 基础 NDK 路径设置
           NDK=$ANDROID_NDK_LATEST_HOME
           TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64
           TARGET=aarch64-linux-android
           API=24
           
-          # 修复点 1：向 GYP 显式注入 NDK 路径变量，解决 gyp 报错
-          echo "android_ndk_path=$NDK" >> $GITHUB_ENV
-          echo "GYP_DEFINES=android_ndk_path=$NDK" >> $GITHUB_ENV
+          # 2. 核心修复：强制定义 GYP 变量，解决 host_os 和 ndk_path 报错
+          # 这里必须一行写完，包含所有 GYP 内部需要的宏定义
+          echo "GYP_DEFINES=target_arch=arm64 v8_target_arch=arm64 android_target_arch=arm64 host_os=linux OS=android android_ndk_path=$NDK" >> $GITHUB_ENV
           
-          # 修复点 2：指定宿主机(Host)编译器
-          # 必须使用宿主机的 gcc/g++ 来编译中间工具（如 v8 snapshot）
-          echo "CC_host=gcc" >> $GITHUB_ENV
-          echo "CXX_host=g++" >> $GITHUB_ENV
-          
-          # 修复点 3：指定目标机(Target)编译器
-          # 使用 NDK 中的 Clang 编译最终在 Android 设备上运行的代码
+          # 3. 指定工具链路径（使用绝对路径最稳妥）
           echo "CC=$TOOLCHAIN/bin/${TARGET}${API}-clang" >> $GITHUB_ENV
           echo "CXX=$TOOLCHAIN/bin/${TARGET}${API}-clang++" >> $GITHUB_ENV
-          echo "LINK=$TOOLCHAIN/bin/${TARGET}${API}-clang++" >> $GITHUB_ENV
           echo "AR=$TOOLCHAIN/bin/llvm-ar" >> $GITHUB_ENV
+          echo "NM=$TOOLCHAIN/bin/llvm-nm" >> $GITHUB_ENV
+          echo "AS=$TOOLCHAIN/bin/${TARGET}${API}-clang" >> $GITHUB_ENV
+          
+          # 4. 设置宿主机编译器（用于编译构建工具）
+          echo "CC_host=gcc" >> $GITHUB_ENV
+          echo "CXX_host=g++" >> $GITHUB_ENV
 
-      - name: 执行 Configure 配置
+      - name: 执行 Configure
         run: |
-          # 修复点 4：追加 --without-intl 参数
-          # 完整编译 ICU 会在交叉编译阶段大概率引发段错误，禁用它能保证 100% 编译成功
+          # 增加 --dest-cpu=arm64 显式声明
+          # 继续保留 --without-intl 以防 ICU 编译挂掉
           ./configure \
             --dest-cpu=arm64 \
             --dest-os=android \
@@ -54,10 +54,10 @@ jobs:
 
       - name: 执行 Make 编译
         run: |
-          # 开始多线程编译 (全程可能需要 30~50 分钟)
+          # 编译 Node.js 非常吃 CPU，这里使用全部核心
           make -j$(nproc)
 
-      - name: 上传 Android 可用二进制产物
+      - name: 整理并上传产物
         uses: actions/upload-artifact@v4
         with:
           name: node-android-arm64
