@@ -1,0 +1,54 @@
+name: Build Node.js for Android (arm64-v8a)
+
+on:
+  workflow_dispatch:
+    inputs:
+      node_version:
+        description: 'Node.js 源码版本标签 (例如: v20.11.1)'
+        required: true
+        default: 'v25.8.1'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出 Node.js 源码
+        uses: actions/checkout@v4
+        with:
+          repository: nodejs/node
+          ref: ${{ github.event.inputs.node_version }}
+          fetch-depth: 1
+
+      - name: 配置 Android NDK 环境变量
+        run: |
+          # 使用 GitHub 运行器预装的 Android NDK
+          NDK=$ANDROID_NDK_LATEST_HOME
+          HOST_TAG=linux-x86_64
+          TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/$HOST_TAG
+          API=24 # 最低支持的 Android API 级别 (Android 7.0)
+          TARGET=aarch64-linux-android
+          
+          # 导出交叉编译所需的编译器路径
+          echo "CC=$TOOLCHAIN/bin/${TARGET}${API}-clang" >> $GITHUB_ENV
+          echo "CXX=$TOOLCHAIN/bin/${TARGET}${API}-clang++" >> $GITHUB_ENV
+          echo "LINK=$TOOLCHAIN/bin/${TARGET}${API}-clang++" >> $GITHUB_ENV
+          echo "AR=$TOOLCHAIN/bin/llvm-ar" >> $GITHUB_ENV
+
+      - name: 配置构建参数 (Configure)
+        run: |
+          # 针对 Android arm64 进行交叉编译配置
+          ./configure \
+            --dest-cpu=arm64 \
+            --dest-os=android \
+            --cross-compiling
+            
+      - name: 执行编译 (Make)
+        run: |
+          # 使用所有可用核心加速编译
+          make -j$(nproc)
+
+      - name: 上传二进制产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-android-arm64
+          path: out/Release/node
