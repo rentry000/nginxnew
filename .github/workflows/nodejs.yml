@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 检出 Node.js 源码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: nodejs/node
           ref: ${{ github.event.inputs.node_version }}
@@ -27,25 +27,22 @@ jobs:
           TARGET=aarch64-linux-android
           API=24
           
-          # 2. 核心修复：强制定义 GYP 变量，解决 host_os 和 ndk_path 报错
-          # 这里必须一行写完，包含所有 GYP 内部需要的宏定义
-          echo "GYP_DEFINES=target_arch=arm64 v8_target_arch=arm64 android_target_arch=arm64 host_os=linux OS=android android_ndk_path=$NDK" >> $GITHUB_ENV
+          # 2. 核心修复：强制定义 GYP 变量（已增加 openssl_no_asm=1）
+          echo "GYP_DEFINES=target_arch=arm64 v8_target_arch=arm64 android_target_arch=arm64 host_os=linux OS=android android_ndk_path=$NDK openssl_no_asm=1" >> $GITHUB_ENV
           
-          # 3. 指定工具链路径（使用绝对路径最稳妥）
-          echo "CC=$TOOLCHAIN/bin/${TARGET}${API}-clang" >> $GITHUB_ENV
-          echo "CXX=$TOOLCHAIN/bin/${TARGET}${API}-clang++" >> $GITHUB_ENV
+          # 3. 指定工具链路径
+          echo "CC=\( TOOLCHAIN/bin/ \){TARGET}${API}-clang" >> $GITHUB_ENV
+          echo "CXX=\( TOOLCHAIN/bin/ \){TARGET}${API}-clang++" >> $GITHUB_ENV
           echo "AR=$TOOLCHAIN/bin/llvm-ar" >> $GITHUB_ENV
           echo "NM=$TOOLCHAIN/bin/llvm-nm" >> $GITHUB_ENV
-          echo "AS=$TOOLCHAIN/bin/${TARGET}${API}-clang" >> $GITHUB_ENV
+          echo "AS=\( TOOLCHAIN/bin/ \){TARGET}${API}-clang" >> $GITHUB_ENV
           
-          # 4. 设置宿主机编译器（用于编译构建工具）
+          # 4. 设置宿主机编译器
           echo "CC_host=gcc" >> $GITHUB_ENV
           echo "CXX_host=g++" >> $GITHUB_ENV
 
       - name: 执行 Configure
         run: |
-          # 增加 --dest-cpu=arm64 显式声明
-          # 继续保留 --without-intl 以防 ICU 编译挂掉
           ./configure \
             --dest-cpu=arm64 \
             --dest-os=android \
@@ -55,11 +52,11 @@ jobs:
 
       - name: 执行 Make 编译
         run: |
-          # 编译 Node.js 非常吃 CPU，这里使用全部核心
+          # 使用全部核心加速编译
           make -j$(nproc)
 
       - name: 整理并上传产物
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: node-android-arm64
           path: out/Release/node
