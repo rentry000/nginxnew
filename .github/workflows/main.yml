@@ -7,7 +7,8 @@ on:
 
 jobs:
   build-caddy:
-    runs-on: ubuntu-latest
+    # 强烈建议在交叉编译时使用 22.04，以确保多架构 APT 源脚本稳定运行
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         go_version: ["1.25"]
@@ -30,7 +31,7 @@ jobs:
 
       - name: Clone CrowdSec Plugin
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN_PAT }}  # 使用你添加的 secret
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN_PAT }}
         run: |
           git clone https://$GH_TOKEN@github.com/hslatman/caddy-crowdsec-bouncer.git crowdsec-plugin
           cd crowdsec-plugin
@@ -51,14 +52,45 @@ jobs:
           git checkout master || true
           cd ..
           
-      - name: Clean Go Module Cache          # ← 新增独立 step，彻底解决 go clean 参数错误
+      - name: Clean Go Module Cache
         run: go clean -modcache
         
-      - name: Install ARM64 Cross Compiler
+      - name: Setup Multi-arch & Install ARM64 Dependencies
         run: |
+          # 1. 开启 arm64 架构支持
+          sudo dpkg --add-architecture arm64
+          
+          # 2. 修改系统默认源，指定其仅用于 amd64
+          sudo sed -i 's/^deb http/deb [arch=amd64] http/' /etc/apt/sources.list
+          
+          # 3. 写入 arm64 专属的 ubuntu-ports 源
+          sudo bash -c 'cat <<EOF > /etc/apt/sources.list.d/arm64.list
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ jammy main restricted universe multiverse
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ jammy-updates main restricted universe multiverse
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ jammy-security main restricted universe multiverse
+          EOF'
+          
+          # 4. 更新源并安装工具链与 arm64 版本的 python/C 依赖
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross
-          sudo apt-get install python3-dev build-essential pkg-config libpython3-dev
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config build-essential
+          # 关键点：安装 arm64 架构的 python3-dev 解决 pyconfig.h 报错
+          sudo apt-get install -y libpython3-dev:arm64 python3-dev:arm64
+
+      - name: Pre-download and Fix watcher-go Headers
+        run: |
+          # 提前下载 watcher 模块，修复 FrankenPHP 依赖的 wtr/watcher-c.h 路径报错
+          go mod init dummy || true
+          go get github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be || true
+          
+          WATCHER_PATH=$(ls -d $(go env GOPATH)/pkg/mod/github.com/e-dant/watcher@* | head -n 1)
+          if [ -n "$WATCHER_PATH" ]; then
+            echo "Patching headers in: $WATCHER_PATH"
+            # 解除 Go mod 缓存的只读限制
+            sudo chmod -R +w "$WATCHER_PATH"
+            # 将缺失的 C 头文件目录复制到 go-watcher 能够 include 的目录下
+            cp -r "$WATCHER_PATH/include/wtr" "$WATCHER_PATH/watcher-go/" || true
+          fi
+
       - name: Build Custom Caddy ARM64 with FrankenPHP
         env:
           GOOS: linux
@@ -67,8 +99,10 @@ jobs:
           CGO_ENABLED: 1
           CC: aarch64-linux-gnu-gcc
           CXX: aarch64-linux-gnu-g++
-          # XCADDY_GO_BUILD_FLAGS: "-ldflags='-w -s' -tags=nobadger,nomysql,nopgx"
-           # XCADDY_GO_BUILD_FLAGS: "-ldflags='-w -s' -tags=nobadger,nomysql,nopgx"
+          # 告诉 pkg-config 去寻找 arm64 的 .pc 文件，确保 caddy-snake 正确链接 libpython
+          PKG_CONFIG_PATH: /usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+          PKG_CONFIG_LIBDIR: /usr/lib/aarch64-linux-gnu/pkgconfig
+          PKG_CONFIG_SYSROOT_DIR: /
         run: |
           ./xcaddy build v2.11.2 \
             --with github.com/dunglas/frankenphp/caddy \
@@ -139,7 +173,7 @@ jobs:
             Custom cross-compiled Caddy v2.11.2 for linux/arm64 (aarch64).
             Built with xcaddy v0.4.5 on Go ${{ matrix.go_version }}.
 
-            **Included plugins:** (Security headers 使用 Caddy 内置 `header` 指令，无需额外插件)
+            **Included plugins:**
             - github.com/mholt/caddy-webdav
             - github.com/caddy-dns/route53@v1.6.0
             - github.com/caddyserver/replace-response
