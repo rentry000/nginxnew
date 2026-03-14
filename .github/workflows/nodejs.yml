@@ -1,59 +1,83 @@
-name: Build Node.js for Android (arm64-v8a)
+name: Build Node.js for Android (arm64)
 
 on:
-  workflow_dispatch:
-    inputs:
-      node_version:
-        description: 'Node.js 源码版本 (例如: v20.11.1)'
-        required: true
-        default: 'v25.8.1'
+  workflow_dispatch: # 支持在 GitHub Actions 页面手动触发
+
+env:
+  NODE_VERSION: "25.8.1"
+  NDK_VERSION: "r29"
+  # 目标 Android API 级别。24 代表 Android 7.0，兼顾兼容性与现代特性
+  API_LEVEL: "24" 
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+
     steps:
-      - name: 检出 Node.js 源码
-        uses: actions/checkout@v6
-        with:
-          repository: nodejs/node
-          ref: ${{ github.event.inputs.node_version }}
-          fetch-depth: 1
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: 配置环境并编译 Node.js (arm64 Android)
+      - name: Install build dependencies
         run: |
-          # NDK 路径（GitHub 自带）
-          NDK=$ANDROID_NDK_LATEST_HOME
-          TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64
+          sudo apt-get update
+          sudo apt-get install -y python3 make python3-pip ninja-build gettext cmake unzip curl wget tar git gcc g++
 
-          # 关键修复：硬编码完整路径，彻底杜绝变量展开问题
-          export CC="$TOOLCHAIN/bin/aarch64-linux-android24-clang"
-          export CXX="$TOOLCHAIN/bin/aarch64-linux-android24-clang++"
-          export AR="$TOOLCHAIN/bin/llvm-ar"
-          export NM="$TOOLCHAIN/bin/llvm-nm"
-          export AS="$TOOLCHAIN/bin/aarch64-linux-android24-clang"
+      - name: Download and Setup Android NDK
+        run: |
+          cd $GITHUB_WORKSPACE
+          # 拉取 NDK r29
+          wget -q https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip -O ndk.zip
+          unzip -q ndk.zip
+          rm ndk.zip
 
-          # GYP 定义（包含 openssl_no_asm）
-          export GYP_DEFINES="target_arch=arm64 v8_target_arch=arm64 android_target_arch=arm64 host_os=linux OS=android android_ndk_path=$NDK openssl_no_asm=1"
+      - name: Download Node.js Source
+        run: |
+          cd $GITHUB_WORKSPACE
+          wget -q https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}.tar.gz
+          tar -xzf node-v${NODE_VERSION}.tar.gz
 
-          # 调试输出（运行时请看这几行是否正确）
-          echo "✅ NDK: $NDK"
-          echo "✅ CC : $CC"
-          echo "✅ CXX: $CXX"
+      - name: Configure and Compile Node.js
+        run: |
+          cd $GITHUB_WORKSPACE/node-v${NODE_VERSION}
 
-          # 执行 Configure
+          # 配置 NDK 工具链路径
+          export ANDROID_NDK_HOME=$GITHUB_WORKSPACE/android-ndk-${NDK_VERSION}
+          export TOOLCHAIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64
+          export PATH=$TOOLCHAIN/bin:$PATH
+
+          # 设置目标架构的交叉编译器 (Target compilers)
+          export CC=$TOOLCHAIN/bin/aarch64-linux-android${API_LEVEL}-clang
+          export CXX=$TOOLCHAIN/bin/aarch64-linux-android${API_LEVEL}-clang++
+          export AR=$TOOLCHAIN/bin/llvm-ar
+          export LD=$TOOLCHAIN/bin/ld.lld
+          export AS=$CC
+          export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
+
+          # 设置宿主机编译器 (Host compilers) - 编译 V8 snapshot 等工具时必需
+          export CC_host=gcc
+          export CXX_host=g++
+          export LINK_host=g++
+
+          # 运行配置脚本
           ./configure \
             --dest-cpu=arm64 \
             --dest-os=android \
-            --cross-compiling \
-            --openssl-no-asm \
-            --without-intl \
-            --without-snapshot
+            --cross-compiling
 
-          # 执行编译（使用全部核心）
+          # 启动多线程编译
           make -j$(nproc)
 
-      - name: 整理并上传产物
-        uses: actions/upload-artifact@v7
+      - name: Strip Binary (Reduce Size)
+        run: |
+          export ANDROID_NDK_HOME=$GITHUB_WORKSPACE/android-ndk-${NDK_VERSION}
+          export TOOLCHAIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64
+          export STRIP=$TOOLCHAIN/bin/llvm-strip
+          
+          # 精简生成的二进制文件体积
+          $STRIP $GITHUB_WORKSPACE/node-v${NODE_VERSION}/out/Release/node
+
+      - name: Upload Node.js Binary
+        uses: actions/upload-artifact@v4
         with:
-          name: node-android-arm64
-          path: out/Release/node
+          name: nodejs-android-arm64-v${{ env.NODE_VERSION }}
+          path: node-v${{ env.NODE_VERSION }}/out/Release/node
