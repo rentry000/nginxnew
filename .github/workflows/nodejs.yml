@@ -1,13 +1,13 @@
 name: Build Node.js for Android (arm64)
 
 on:
-  workflow_dispatch: # 支持在 GitHub Actions 页面手动触发
+  workflow_dispatch:
 
 env:
-  NODE_VERSION: "25.8.1"
+  # 注意：请确保这是真实存在的官方版本号，否则下载源码步骤会报 404 错误
+  NODE_VERSION: "25.8.1" 
   NDK_VERSION: "r29"
-  # 目标 Android API 级别。24 代表 Android 7.0，兼顾兼容性与现代特性
-  API_LEVEL: "24" 
+  API_LEVEL: "24"
 
 jobs:
   build:
@@ -25,7 +25,6 @@ jobs:
       - name: Download and Setup Android NDK
         run: |
           cd $GITHUB_WORKSPACE
-          # 拉取 NDK r29
           wget -q https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip -O ndk.zip
           unzip -q ndk.zip
           rm ndk.zip
@@ -33,19 +32,22 @@ jobs:
       - name: Download Node.js Source
         run: |
           cd $GITHUB_WORKSPACE
-          wget -q https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}.tar.gz
-          tar -xzf node-v${NODE_VERSION}.tar.gz
+          # 使用 wget 并配合 tar 边下载边解压，如果版本号不存在，此步将失败
+          wget -qO- https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}.tar.gz | tar xz
 
       - name: Configure and Compile Node.js
         run: |
           cd $GITHUB_WORKSPACE/node-v${NODE_VERSION}
 
-          # 配置 NDK 工具链路径
+          # 声明 NDK 和 工具链路径
           export ANDROID_NDK_HOME=$GITHUB_WORKSPACE/android-ndk-${NDK_VERSION}
           export TOOLCHAIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64
           export PATH=$TOOLCHAIN/bin:$PATH
 
-          # 设置目标架构的交叉编译器 (Target compilers)
+          # 核心修复：通过 GYP_DEFINES 将 NDK 路径喂给 GYP 构建系统
+          export GYP_DEFINES="android_ndk_path=$ANDROID_NDK_HOME OS=android target_arch=arm64"
+
+          # 目标机 (Android arm64) 编译器
           export CC=$TOOLCHAIN/bin/aarch64-linux-android${API_LEVEL}-clang
           export CXX=$TOOLCHAIN/bin/aarch64-linux-android${API_LEVEL}-clang++
           export AR=$TOOLCHAIN/bin/llvm-ar
@@ -53,18 +55,20 @@ jobs:
           export AS=$CC
           export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
 
-          # 设置宿主机编译器 (Host compilers) - 编译 V8 snapshot 等工具时必需
+          # 宿主机 (Ubuntu x64) 编译器 (用于编译构建期间需要的临时工具)
           export CC_host=gcc
           export CXX_host=g++
           export LINK_host=g++
 
-          # 运行配置脚本
+          # 运行配置脚本。加入了禁用 intl 和 snapshot 防报错
           ./configure \
             --dest-cpu=arm64 \
             --dest-os=android \
-            --cross-compiling
+            --cross-compiling \
+            --with-intl=none \
+            --without-snapshot
 
-          # 启动多线程编译
+          # 满载多线程编译
           make -j$(nproc)
 
       - name: Strip Binary (Reduce Size)
@@ -73,7 +77,7 @@ jobs:
           export TOOLCHAIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64
           export STRIP=$TOOLCHAIN/bin/llvm-strip
           
-          # 精简生成的二进制文件体积
+          # 精简生成的二进制文件，大幅缩小体积
           $STRIP $GITHUB_WORKSPACE/node-v${NODE_VERSION}/out/Release/node
 
       - name: Upload Node.js Binary
