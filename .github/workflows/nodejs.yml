@@ -21,25 +21,32 @@ jobs:
 
       - name: 配置编译环境
         run: |
-          # 1. 基础 NDK 路径设置
+          # 1. 设置基础变量
           NDK=$ANDROID_NDK_LATEST_HOME
           TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64
           TARGET=aarch64-linux-android
           API=24
           
-          # 2. 核心修复：强制定义 GYP 变量（已增加 openssl_no_asm=1）
-          echo "GYP_DEFINES=target_arch=arm64 v8_target_arch=arm64 android_target_arch=arm64 host_os=linux OS=android android_ndk_path=$NDK openssl_no_asm=1" >> $GITHUB_ENV
+          # 2. 关键修复：先完整展开路径，再写入 GITHUB_ENV（解决 (: not found）
+          CC="\( TOOLCHAIN/bin/ \){TARGET}${API}-clang"
+          CXX="\( TOOLCHAIN/bin/ \){TARGET}${API}-clang++"
+          AR="$TOOLCHAIN/bin/llvm-ar"
+          NM="$TOOLCHAIN/bin/llvm-nm"
+          AS="\( TOOLCHAIN/bin/ \){TARGET}${API}-clang"
           
-          # 3. 指定工具链路径
-          echo "CC=\( TOOLCHAIN/bin/ \){TARGET}${API}-clang" >> $GITHUB_ENV
-          echo "CXX=\( TOOLCHAIN/bin/ \){TARGET}${API}-clang++" >> $GITHUB_ENV
-          echo "AR=$TOOLCHAIN/bin/llvm-ar" >> $GITHUB_ENV
-          echo "NM=$TOOLCHAIN/bin/llvm-nm" >> $GITHUB_ENV
-          echo "AS=\( TOOLCHAIN/bin/ \){TARGET}${API}-clang" >> $GITHUB_ENV
+          export CC CXX AR NM AS
           
-          # 4. 设置宿主机编译器
+          echo "CC=$CC" >> $GITHUB_ENV
+          echo "CXX=$CXX" >> $GITHUB_ENV
+          echo "AR=$AR" >> $GITHUB_ENV
+          echo "NM=$NM" >> $GITHUB_ENV
+          echo "AS=$AS" >> $GITHUB_ENV
+          
           echo "CC_host=gcc" >> $GITHUB_ENV
           echo "CXX_host=g++" >> $GITHUB_ENV
+          
+          # 3. GYP 定义（已包含 openssl_no_asm）
+          echo "GYP_DEFINES=target_arch=arm64 v8_target_arch=arm64 android_target_arch=arm64 host_os=linux OS=android android_ndk_path=$NDK openssl_no_asm=1" >> $GITHUB_ENV
 
       - name: 执行 Configure
         run: |
@@ -52,7 +59,6 @@ jobs:
 
       - name: 执行 Make 编译
         run: |
-          # 使用全部核心加速编译
           make -j$(nproc)
 
       - name: 整理并上传产物
