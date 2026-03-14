@@ -54,15 +54,24 @@ jobs:
       - name: Clean Go Module Cache          # ← 新增独立 step，彻底解决 go clean 参数错误
         run: go clean -modcache
         
-      - name: Build Custom Caddy ARM64
+      - name: Install ARM64 Cross Compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross
+
+      - name: Build Custom Caddy ARM64 with FrankenPHP
         env:
           GOOS: linux
           GOARCH: arm64
           GOPROXY: https://goproxy.cn,direct
           CGO_ENABLED: 1
-         # XCADDY_GO_BUILD_FLAGS: "-ldflags='-w -s' -tags=nobadger,nomysql,nopgx"
+          CC: aarch64-linux-gnu-gcc
+          CXX: aarch64-linux-gnu-g++
+          # XCADDY_GO_BUILD_FLAGS: "-ldflags='-w -s' -tags=nobadger,nomysql,nopgx"
+           # XCADDY_GO_BUILD_FLAGS: "-ldflags='-w -s' -tags=nobadger,nomysql,nopgx"
         run: |
           ./xcaddy build v2.11.2 \
+            --with github.com/dunglas/frankenphp/caddy \
             --with github.com/mholt/caddy-webdav \
             --with github.com/caddy-dns/route53@v1.6.0 \
             --with github.com/caddyserver/replace-response \
@@ -96,7 +105,6 @@ jobs:
             --with github.com/hslatman/caddy-crowdsec-bouncer/layer4 \
             --with github.com/libdns/cloudflare \
             --with github.com/mliezun/caddy-snake \
-            --with github.com/dunglas/frankenphp/caddy \
             --with github.com/porech/caddy-maxmind-geolocation \
             --with github.com/hslatman/caddy-crowdsec-bouncer/http \
             --with pkg.jsn.cam/caddy-defender@v0.10.0 \
