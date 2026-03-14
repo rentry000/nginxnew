@@ -93,6 +93,7 @@ jobs:
             --with github.com/hslatman/caddy-crowdsec-bouncer/appsec \
             --with github.com/hslatman/caddy-crowdsec-bouncer/layer4 \
             --with github.com/libdns/cloudflare \
+            --with github.com/dunglas/frankenphp/caddy \
             --with github.com/porech/caddy-maxmind-geolocation \
             --with github.com/hslatman/caddy-crowdsec-bouncer/http \
             --with pkg.jsn.cam/caddy-defender@v0.10.0 \
