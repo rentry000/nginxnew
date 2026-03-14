@@ -50,14 +50,16 @@ jobs:
           cd t1k-go
           git checkout master || true
           cd ..
-
+          
+      - name: Clean Go Module Cache          # ← 新增独立 step，彻底解决 go clean 参数错误
+        run: go clean -modcache
+        
       - name: Build Custom Caddy ARM64
         env:
           GOOS: linux
           GOARCH: arm64
           GOPROXY: https://goproxy.cn,direct
         run: |
-          go clean -modcache
           ./xcaddy build v2.11.1 \
             --with github.com/mholt/caddy-webdav \
             --with github.com/caddy-dns/route53@v1.6.0 \
