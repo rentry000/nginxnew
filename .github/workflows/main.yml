@@ -50,19 +50,18 @@ jobs:
           cd t1k-go
           git checkout master || true
           cd ..
-          
+
       - name: Clean Go Module Cache
         run: go clean -modcache
-        
+
       - name: Setup Multi-arch & Install ARM64 Dependencies
         run: |
           # 1. 开启 arm64 架构支持
           sudo dpkg --add-architecture arm64
           
           # 2. 批量修改系统中原有的源，全部强制加上 [arch=amd64] 限制
-          # 拦截所有以 deb http, deb mirror, deb git 开头的行，避免去 amd64 源找 arm64 包
           sudo sed -i 's/^deb \(http\|mirror\|git\|azure\)/deb [arch=amd64] \1/g' /etc/apt/sources.list
-          sudo bash -c 'find /etc/apt/sources.list.d/ -type f -name "*.list" -exec sed -i "s/^deb \(http\|mirror\|git\|azure\)/deb [arch=amd64] \1/g" {} +'
+          sudo bash -c 'find /etc/apt/sources.list.d/ -type f -name "*.list" -exec sed -i "s/^deb \(http\|mirror\|git\|azure\)/deb [arch=amd64] \1/g" {} +' 
           
           # 3. 写入 arm64 专属的 ubuntu-ports 源
           sudo bash -c 'cat <<EOF > /etc/apt/sources.list.d/arm64.list
@@ -91,7 +90,15 @@ jobs:
             cp -r "$WATCHER_PATH/include/wtr" "$WATCHER_PATH/watcher-go/" || true
           fi
 
-      - name: Build Custom Caddy ARM64 with FrankenPHP
+      - name: Set up QEMU for arm64
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Custom Caddy ARM64 with FrankenPHP in arm64 container
         env:
           GOOS: linux
           GOARCH: arm64
@@ -103,48 +110,65 @@ jobs:
           PKG_CONFIG_LIBDIR: /usr/lib/aarch64-linux-gnu/pkgconfig
           PKG_CONFIG_SYSROOT_DIR: /
         run: |
-          ./xcaddy build v2.11.2 \
-            --with github.com/dunglas/frankenphp/caddy \
-            --with github.com/mholt/caddy-webdav \
-            --with github.com/caddy-dns/route53@v1.6.0 \
-            --with github.com/caddyserver/replace-response \
-            --with github.com/caddyserver/transform-encoder \
-            --with github.com/caddyserver/cache-handler \
-            --with github.com/caddy-dns/cloudflare \
-            --with github.com/caddy-dns/duckdns \
-            --with github.com/greenpau/caddy-security \
-            --with github.com/mholt/caddy-l4 \
-            --with github.com/caddyserver/nginx-adapter \
-            --with github.com/caddyserver/ntlm-transport \
-            --with github.com/mholt/caddy-dynamicdns \
-            --with github.com/sagikazarmark/caddy-fs-s3 \
-            --with github.com/ueffel/caddy-brotli \
-            --with github.com/corazawaf/coraza-caddy/v2 \
-            --with github.com/mholt/caddy-ratelimit \
-            --with github.com/invzhi/caddy-docker-upstreams \
-            --with github.com/hslatman/caddy-crowdsec-bouncer \
-            --with github.com/mholt/caddy-events-exec \
-            --with github.com/caddyserver/forwardproxy \
-            --with github.com/kirsch33/realip \
-            --with github.com/sjtug/caddy2-filter \
-            --with github.com/lucaslorentz/caddy-docker-proxy/v2 \
-            --with github.com/caddyserver/circuitbreaker \
-            --with github.com/caddyserver/jsonc-adapter \
-            --with github.com/caddyserver/json5-adapter \
-            --with github.com/SakuraHentai/caddy-dynamic-routing \
-            --with github.com/ysicing/caddy2-geocn \
-            --with github.com/steffenbusch/caddy-placeholder-dump \
-            --with github.com/hslatman/caddy-crowdsec-bouncer/appsec \
-            --with github.com/hslatman/caddy-crowdsec-bouncer/layer4 \
-            --with github.com/libdns/cloudflare \
-            --with github.com/mliezun/caddy-snake \
-            --with github.com/porech/caddy-maxmind-geolocation \
-            --with github.com/hslatman/caddy-crowdsec-bouncer/http \
-            --with pkg.jsn.cam/caddy-defender@v0.10.0 \
-            --replace github.com/W0n9/caddy_waf_t1k=./caddy_waf_t1k \
-            --replace github.com/chaitin/t1k-go=./t1k-go \
-            --replace github.com/hslatman/caddy-crowdsec-bouncer=./crowdsec-plugin \
-            --output ./caddy-arm64
+          docker run --rm -it --platform linux/arm64 \
+            -v $(pwd):/workspace \
+            -w /workspace \
+            -e GOOS=linux \
+            -e GOARCH=arm64 \
+            -e CGO_ENABLED=1 \
+            -e CC=aarch64-linux-gnu-gcc \
+            -e CXX=aarch64-linux-gnu-g++ \
+            -e GOPROXY=https://goproxy.cn,direct \
+            -e PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig \
+            -e PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig \
+            -e PKG_CONFIG_SYSROOT_DIR=/ \
+            golang:1.25 \
+            bash -c "
+              apt-get update && apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config build-essential python3-dev libpython3-dev &&
+              go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest &&
+              xcaddy build v2.11.2 \
+                --with github.com/dunglas/frankenphp/caddy \
+                --with github.com/mholt/caddy-webdav \
+                --with github.com/caddy-dns/route53@v1.6.0 \
+                --with github.com/caddyserver/replace-response \
+                --with github.com/caddyserver/transform-encoder \
+                --with github.com/caddyserver/cache-handler \
+                --with github.com/caddy-dns/cloudflare \
+                --with github.com/caddy-dns/duckdns \
+                --with github.com/greenpau/caddy-security \
+                --with github.com/mholt/caddy-l4 \
+                --with github.com/caddyserver/nginx-adapter \
+                --with github.com/caddyserver/ntlm-transport \
+                --with github.com/mholt/caddy-dynamicdns \
+                --with github.com/sagikazarmark/caddy-fs-s3 \
+                --with github.com/ueffel/caddy-brotli \
+                --with github.com/corazawaf/coraza-caddy/v2 \
+                --with github.com/mholt/caddy-ratelimit \
+                --with github.com/invzhi/caddy-docker-upstreams \
+                --with github.com/hslatman/caddy-crowdsec-bouncer \
+                --with github.com/mholt/caddy-events-exec \
+                --with github.com/caddyserver/forwardproxy \
+                --with github.com/kirsch33/realip \
+                --with github.com/sjtug/caddy2-filter \
+                --with github.com/lucaslorentz/caddy-docker-proxy/v2 \
+                --with github.com/caddyserver/circuitbreaker \
+                --with github.com/caddyserver/jsonc-adapter \
+                --with github.com/caddyserver/json5-adapter \
+                --with github.com/SakuraHentai/caddy-dynamic-routing \
+                --with github.com/ysicing/caddy2-geocn \
+                --with github.com/steffenbusch/caddy-placeholder-dump \
+                --with github.com/hslatman/caddy-crowdsec-bouncer/appsec \
+                --with github.com/hslatman/caddy-crowdsec-bouncer/layer4 \
+                --with github.com/libdns/cloudflare \
+                --with github.com/mliezun/caddy-snake \
+                --with github.com/porech/caddy-maxmind-geolocation \
+                --with github.com/hslatman/caddy-crowdsec-bouncer/http \
+                --with pkg.jsn.cam/caddy-defender@v0.10.0 \
+                --replace github.com/W0n9/caddy_waf_t1k=./caddy_waf_t1k \
+                --replace github.com/chaitin/t1k-go=./t1k-go \
+                --replace github.com/hslatman/caddy-crowdsec-bouncer=./crowdsec-plugin \
+                --output ./caddy-arm64
+            "
 
       - name: Show Build Result Info
         run: |
