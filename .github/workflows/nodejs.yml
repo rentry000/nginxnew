@@ -4,10 +4,11 @@ on:
   workflow_dispatch:
 
 env:
-  # 注意：请确保这是真实存在的官方版本号，否则下载源码步骤会报 404 错误
-  NODE_VERSION: "25.8.1" 
+  # 确保此版本在官方 https://nodejs.org/dist/ 中存在
+  NODE_VERSION: "25.8.1"
   NDK_VERSION: "r29"
-  API_LEVEL: "24"
+  # 提高到 26 以获得更好的现代 NDK 支持
+  API_LEVEL: "26"
 
 jobs:
   build:
@@ -20,7 +21,8 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3 make python3-pip ninja-build gettext cmake unzip curl wget tar git gcc g++
+          sudo apt-get install -y python3 make python3-pip ninja-build gettext cmake unzip \
+            curl wget tar git gcc g++ qemu-user-static
 
       - name: Download and Setup Android NDK
         run: |
@@ -32,56 +34,51 @@ jobs:
       - name: Download Node.js Source
         run: |
           cd $GITHUB_WORKSPACE
-          # 使用 wget 并配合 tar 边下载边解压，如果版本号不存在，此步将失败
-          wget -qO- https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}.tar.gz | tar xz
+          # 尝试下载源码，如果 25.8.1 不存在，建议改为当前最新的 23.x
+          wget -qO- https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}.tar.gz | tar xz || echo "Version not found!"
 
       - name: Configure and Compile Node.js
         run: |
           cd $GITHUB_WORKSPACE/node-v${NODE_VERSION}
 
-          # 声明 NDK 和 工具链路径
           export ANDROID_NDK_HOME=$GITHUB_WORKSPACE/android-ndk-${NDK_VERSION}
           export TOOLCHAIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64
           export PATH=$TOOLCHAIN/bin:$PATH
 
-          # 核心修复：通过 GYP_DEFINES 将 NDK 路径喂给 GYP 构建系统
-          export GYP_DEFINES="android_ndk_path=$ANDROID_NDK_HOME OS=android target_arch=arm64"
+          # 关键点 1：显式定义所有 GYP 变量，解决 host_os 报错
+          export GYP_DEFINES="android_ndk_path=$ANDROID_NDK_HOME OS=android target_arch=arm64 host_os=linux v8_target_arch=arm64"
 
-          # 目标机 (Android arm64) 编译器
+          # 关键点 2：设置交叉编译器
           export CC=$TOOLCHAIN/bin/aarch64-linux-android${API_LEVEL}-clang
           export CXX=$TOOLCHAIN/bin/aarch64-linux-android${API_LEVEL}-clang++
           export AR=$TOOLCHAIN/bin/llvm-ar
+          export NM=$TOOLCHAIN/bin/llvm-nm
           export LD=$TOOLCHAIN/bin/ld.lld
-          export AS=$CC
           export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
-
-          # 宿主机 (Ubuntu x64) 编译器 (用于编译构建期间需要的临时工具)
+          
+          # 宿主机编译器
           export CC_host=gcc
           export CXX_host=g++
-          export LINK_host=g++
 
-          # 运行配置脚本。加入了禁用 intl 和 snapshot 防报错
+          # 关键点 3：Node.js 22+ 版本建议使用 --with-intl=small-icu 或 none
+          # 移除 --without-snapshot，因为新版已不支持禁用它
           ./configure \
             --dest-cpu=arm64 \
             --dest-os=android \
             --cross-compiling \
-            --with-intl=none \
-            --without-snapshot
+            --with-intl=none
 
-          # 满载多线程编译
+          # 关键点 4：使用 QEMU 辅助编译（处理 V8 字节码生成）
+          # 某些 Node 版本在编译时需要运行二进制，QEMU 会透明处理
           make -j$(nproc)
 
-      - name: Strip Binary (Reduce Size)
+      - name: Strip and Package
         run: |
-          export ANDROID_NDK_HOME=$GITHUB_WORKSPACE/android-ndk-${NDK_VERSION}
-          export TOOLCHAIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64
-          export STRIP=$TOOLCHAIN/bin/llvm-strip
+          export TOOLCHAIN=$GITHUB_WORKSPACE/android-ndk-${NDK_VERSION}/toolchains/llvm/prebuilt/linux-x86_64
+          $TOOLCHAIN/bin/llvm-strip $GITHUB_WORKSPACE/node-v${NODE_VERSION}/out/Release/node
           
-          # 精简生成的二进制文件，大幅缩小体积
-          $STRIP $GITHUB_WORKSPACE/node-v${NODE_VERSION}/out/Release/node
-
-      - name: Upload Node.js Binary
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nodejs-android-arm64-v${{ env.NODE_VERSION }}
+          name: node-android-arm64
           path: node-v${{ env.NODE_VERSION }}/out/Release/node
