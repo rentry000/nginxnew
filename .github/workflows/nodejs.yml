@@ -50,6 +50,7 @@ jobs:
             --dest-cpu=arm64 \
             --dest-os=android \
             --cross-compiling \
+            --openssl-no-asm \
             --without-intl
 
       - name: 执行 Make 编译
