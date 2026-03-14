@@ -7,7 +7,6 @@ on:
 
 jobs:
   build-caddy:
-    # 强烈建议在交叉编译时使用 22.04，以确保多架构 APT 源脚本稳定运行
     runs-on: ubuntu-22.04
     strategy:
       matrix:
@@ -60,8 +59,10 @@ jobs:
           # 1. 开启 arm64 架构支持
           sudo dpkg --add-architecture arm64
           
-          # 2. 修改系统默认源，指定其仅用于 amd64
-          sudo sed -i 's/^deb http/deb [arch=amd64] http/' /etc/apt/sources.list
+          # 2. 批量修改系统中原有的源，全部强制加上 [arch=amd64] 限制
+          # 拦截所有以 deb http, deb mirror, deb git 开头的行，避免去 amd64 源找 arm64 包
+          sudo sed -i 's/^deb \(http\|mirror\|git\|azure\)/deb [arch=amd64] \1/g' /etc/apt/sources.list
+          sudo bash -c 'find /etc/apt/sources.list.d/ -type f -name "*.list" -exec sed -i "s/^deb \(http\|mirror\|git\|azure\)/deb [arch=amd64] \1/g" {} +'
           
           # 3. 写入 arm64 专属的 ubuntu-ports 源
           sudo bash -c 'cat <<EOF > /etc/apt/sources.list.d/arm64.list
@@ -73,7 +74,6 @@ jobs:
           # 4. 更新源并安装工具链与 arm64 版本的 python/C 依赖
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config build-essential
-          # 关键点：安装 arm64 架构的 python3-dev 解决 pyconfig.h 报错
           sudo apt-get install -y libpython3-dev:arm64 python3-dev:arm64
 
       - name: Pre-download and Fix watcher-go Headers
@@ -99,7 +99,6 @@ jobs:
           CGO_ENABLED: 1
           CC: aarch64-linux-gnu-gcc
           CXX: aarch64-linux-gnu-g++
-          # 告诉 pkg-config 去寻找 arm64 的 .pc 文件，确保 caddy-snake 正确链接 libpython
           PKG_CONFIG_PATH: /usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
           PKG_CONFIG_LIBDIR: /usr/lib/aarch64-linux-gnu/pkgconfig
           PKG_CONFIG_SYSROOT_DIR: /
@@ -160,7 +159,7 @@ jobs:
           path: ./caddy-arm64
           retention-days: 14
 
-      - name: Publish to GitHub Releases (on main branch)
+      - name: Publish to GitHub Releases
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
@@ -172,36 +171,3 @@ jobs:
           body: |
             Custom cross-compiled Caddy v2.11.2 for linux/arm64 (aarch64).
             Built with xcaddy v0.4.5 on Go ${{ matrix.go_version }}.
-
-            **Included plugins:**
-            - github.com/mholt/caddy-webdav
-            - github.com/caddy-dns/route53@v1.6.0
-            - github.com/caddyserver/replace-response
-            - github.com/caddyserver/transform-encoder
-            - github.com/caddyserver/cache-handler
-            - github.com/caddy-dns/cloudflare
-            - github.com/caddy-dns/duckdns
-            - github.com/greenpau/caddy-security
-            - github.com/mholt/caddy-l4
-            - github.com/caddyserver/nginx-adapter
-            - github.com/caddyserver/ntlm-transport
-            - github.com/mholt/caddy-dynamicdns
-            - github.com/sagikazarmark/caddy-fs-s3
-            - github.com/ueffel/caddy-brotli
-            - github.com/corazawaf/coraza-caddy/v2
-            - github.com/mholt/caddy-ratelimit
-            - github.com/invzhi/caddy-docker-upstreams
-            - github.com/hslatman/caddy-crowdsec-bouncer
-            - github.com/mholt/caddy-events-exec
-            - github.com/caddyserver/forwardproxy
-            - github.com/kirsch33/realip
-            - github.com/sjtug/caddy2-filter
-            - github.com/lucaslorentz/caddy-docker-proxy/v2
-            - github.com/caddyserver/circuitbreaker
-            - github.com/caddyserver/jsonc-adapter
-            - github.com/caddyserver/json5-adapter
-            - github.com/W0n9/caddy_waf_t1k (local)
-            - github.com/chaitin/t1k-go (local)
-            - pkg.jsn.cam/caddy-defender@v0.10.0
-
-            This build uses local replace for t1k-related plugins to avoid pseudo-version errors.
