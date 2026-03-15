@@ -50,7 +50,30 @@ jobs:
           cd t1k-go
           git checkout master || true
           cd ..
+      - name: Pre-download and Fix watcher-go Headers
+        run: |
+          echo "=== Fixing watcher-c.h for ARM64 ==="
+          go mod init dummy || true
+          go get github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be || true
           
+          WATCHER_PATH=$(go list -m -f {{.Dir}} github.com/e-dant/watcher)
+          echo "Watcher path: $WATCHER_PATH"
+          
+          if [ -n "$WATCHER_PATH" ]; then
+            sudo chmod -R +w "$WATCHER_PATH"
+            
+            # 关键修复：把 include/wtr 复制到 watcher-go 目录下
+            mkdir -p "$WATCHER_PATH/watcher-go/wtr"
+            cp -r "$WATCHER_PATH/include/wtr/"* "$WATCHER_PATH/watcher-go/wtr/" 2>/dev/null || true
+            
+            # 额外复制到模块根目录（双保险）
+            cp -r "$WATCHER_PATH/include/wtr" "$WATCHER_PATH/" 2>/dev/null || true
+            
+            echo "watcher-c.h patch completed"
+            ls -l "$WATCHER_PATH/watcher-go/wtr/" || true
+          else
+            echo "Watcher path not found!"
+          fi
       - name: Clean Go Module Cache          # 鈫� 鏂板鐙珛 step锛屽交搴曡В鍐� go clean 鍙傛暟閿欒
         run: go clean -modcache
         
@@ -67,6 +90,7 @@ jobs:
           CGO_ENABLED: 1
           CC: aarch64-linux-gnu-gcc
           CXX: aarch64-linux-gnu-g++
+          CGO_CPPFLAGS: -I/home/runner/go/pkg/mod/github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be/watcher-go
           # XCADDY_GO_BUILD_FLAGS: "-ldflags='-w -s' -tags=nobadger,nomysql,nopgx"
            # XCADDY_GO_BUILD_FLAGS: "-ldflags='-w -s' -tags=nobadger,nomysql,nopgx"
         run: |
