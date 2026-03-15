@@ -30,7 +30,7 @@ jobs:
 
       - name: Clone CrowdSec Plugin
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN_PAT }}  # 浣跨敤浣犳坊鍔犵殑 secret
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN_PAT }}
         run: |
           git clone https://$GH_TOKEN@github.com/hslatman/caddy-crowdsec-bouncer.git crowdsec-plugin
           cd crowdsec-plugin
@@ -39,17 +39,16 @@ jobs:
 
       - name: Clone W0n9/caddy_waf_t1k and chaitin/t1k-go Locally
         run: |
-          # 鍏嬮殕 caddy_waf_t1k
           git clone https://github.com/W0n9/caddy_waf_t1k.git caddy_waf_t1k
           cd caddy_waf_t1k
           git checkout master || true
           cd ..
 
-          # 鍏嬮殕 chaitin/t1k-go
           git clone https://github.com/chaitin/t1k-go.git t1k-go
           cd t1k-go
           git checkout master || true
           cd ..
+
       - name: Pre-download and Fix watcher-go Headers
         run: |
           echo "=== Fixing watcher-c.h for ARM64 (strong patch) ==="
@@ -62,11 +61,9 @@ jobs:
           if [ -n "$WATCHER_PATH" ]; then
             sudo chmod -R +w "$WATCHER_PATH"
             
-            # 创建 watcher-go/wtr 目录并复制头文件（双保险）
             mkdir -p "$WATCHER_PATH/watcher-go/wtr"
             cp -r "$WATCHER_PATH/include/wtr/"* "$WATCHER_PATH/watcher-go/wtr/" 2>/dev/null || true
             
-            # 如果头文件还是缺失，手动创建一个空的 dummy header（防止编译中断）
             if [ ! -f "$WATCHER_PATH/watcher-go/wtr/watcher-c.h" ]; then
               echo "Creating dummy watcher-c.h ..."
               cat > "$WATCHER_PATH/watcher-go/wtr/watcher-c.h" << 'EOF'
@@ -85,14 +82,15 @@ jobs:
           else
             echo "Watcher path not found!"
           fi
-      - name: Clean Go Module Cache          # 鈫� 鏂板鐙珛 step锛屽交搴曡В鍐� go clean 鍙傛暟閿欒
+
+      - name: Clean Go Module Cache
         run: go clean -modcache
-        
+
       - name: Install ARM64 Cross Compiler
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross
-          sudo apt-get install python3-dev build-essential pkg-config libpython3-dev
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config build-essential
+
       - name: Build Custom Caddy ARM64 with FrankenPHP
         env:
           GOOS: linux
@@ -103,7 +101,6 @@ jobs:
           CXX: aarch64-linux-gnu-g++
           CGO_CPPFLAGS: -I/home/runner/go/pkg/mod/github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be/watcher-go/wtr
           CGO_CFLAGS: -I/home/runner/go/pkg/mod/github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be/watcher-go/wtr
-          # XCADDY_GO_BUILD_FLAGS: "-ldflags='-w -s' -tags=nobadger,nomysql,nopgx"
         run: |
           ./xcaddy build v2.11.2 \
             --with github.com/dunglas/frankenphp/caddy \
@@ -172,36 +169,3 @@ jobs:
           body: |
             Custom cross-compiled Caddy v2.11.2 for linux/arm64 (aarch64).
             Built with xcaddy v0.4.5 on Go ${{ matrix.go_version }}.
-
-            **Included plugins:** (Security headers 浣跨敤 Caddy 鍐呯疆 `header` 鎸囦护锛屾棤闇€棰濆鎻掍欢)
-            - github.com/mholt/caddy-webdav
-            - github.com/caddy-dns/route53@v1.6.0
-            - github.com/caddyserver/replace-response
-            - github.com/caddyserver/transform-encoder
-            - github.com/caddyserver/cache-handler
-            - github.com/caddy-dns/cloudflare
-            - github.com/caddy-dns/duckdns
-            - github.com/greenpau/caddy-security
-            - github.com/mholt/caddy-l4
-            - github.com/caddyserver/nginx-adapter
-            - github.com/caddyserver/ntlm-transport
-            - github.com/mholt/caddy-dynamicdns
-            - github.com/sagikazarmark/caddy-fs-s3
-            - github.com/ueffel/caddy-brotli
-            - github.com/corazawaf/coraza-caddy/v2
-            - github.com/mholt/caddy-ratelimit
-            - github.com/invzhi/caddy-docker-upstreams
-            - github.com/hslatman/caddy-crowdsec-bouncer
-            - github.com/mholt/caddy-events-exec
-            - github.com/caddyserver/forwardproxy
-            - github.com/kirsch33/realip
-            - github.com/sjtug/caddy2-filter
-            - github.com/lucaslorentz/caddy-docker-proxy/v2
-            - github.com/caddyserver/circuitbreaker
-            - github.com/caddyserver/jsonc-adapter
-            - github.com/caddyserver/json5-adapter
-            - github.com/W0n9/caddy_waf_t1k (local)
-            - github.com/chaitin/t1k-go (local)
-            - pkg.jsn.cam/caddy-defender@v0.10.0
-
-            This build uses local replace for t1k-related plugins to avoid pseudo-version errors.
