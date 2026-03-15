@@ -1,4 +1,4 @@
-Name: Build Custom Caddy ARM64 (Latest v2.11.1)
+name: Build Custom Caddy ARM64 (Latest v2.11.1)
 
 on:
   push:
