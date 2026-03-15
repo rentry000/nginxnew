@@ -26,30 +26,74 @@ jobs:
           wget https://github.com/caddyserver/xcaddy/releases/download/v0.4.5/xcaddy_0.4.5_linux_amd64.tar.gz
           tar -xzf xcaddy_0.4.5_linux_amd64.tar.gz
           chmod +x xcaddy
+          ./xcaddy version
 
-      - name: Clone Local Plugins
+      - name: Clone CrowdSec Plugin
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN_PAT }}
         run: |
           git clone https://$GH_TOKEN@github.com/hslatman/caddy-crowdsec-bouncer.git crowdsec-plugin
+          cd crowdsec-plugin
+          git checkout main || true
+          cd ..
+
+      - name: Clone W0n9/caddy_waf_t1k and chaitin/t1k-go Locally
+        run: |
           git clone https://github.com/W0n9/caddy_waf_t1k.git caddy_waf_t1k
+          cd caddy_waf_t1k
+          git checkout master || true
+          cd ..
+
           git clone https://github.com/chaitin/t1k-go.git t1k-go
+          cd t1k-go
+          git checkout master || true
+          cd ..
+
+      - name: Pre-download and Fix watcher-go Headers
+        run: |
+          echo "=== Fixing watcher-c.h for ARM64 (printf patch) ==="
+          go mod init dummy || true
+          go get github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be || true
+          
+          WATCHER_PATH=$(go list -m -f {{.Dir}} github.com/e-dant/watcher)
+          echo "Watcher path: $WATCHER_PATH"
+          
+          if [ -n "$WATCHER_PATH" ]; then
+            sudo chmod -R +w "$WATCHER_PATH"
+            
+            mkdir -p "$WATCHER_PATH/watcher-go/wtr"
+            cp -r "$WATCHER_PATH/include/wtr/"* "$WATCHER_PATH/watcher-go/wtr/" 2>/dev/null || true
+            
+            if [ ! -f "$WATCHER_PATH/watcher-go/wtr/watcher-c.h" ]; then
+              echo "Creating dummy watcher-c.h with printf..."
+              # 使用 printf 单行输出，彻底避开 EOF 缩进引发的语法错误
+              printf "/* Dummy header for ARM64 cross-compile */\n#ifndef WTR_WATCHER_C_H\n#define WTR_WATCHER_C_H\ntypedef void* watcher_t;\nwatcher_t watcher_new(const char* path);\nvoid watcher_destroy(watcher_t w);\n#endif\n" > "$WATCHER_PATH/watcher-go/wtr/watcher-c.h"
+            fi
+            
+            echo "watcher patch completed"
+            ls -l "$WATCHER_PATH/watcher-go/wtr/" || true
+          else
+            echo "Watcher path not found!"
+          fi
+
+      - name: Clean Go Module Cache
+        run: go clean -modcache
 
       - name: Install ARM64 Cross Compiler
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config build-essential
 
-      - name: Build Custom Caddy ARM64 with FrankenPHP (No Watcher)
+      - name: Build Custom Caddy ARM64 with FrankenPHP
         env:
           GOOS: linux
           GOARCH: arm64
-          GOPROXY: https://proxy.golang.org,direct
+          GOPROXY: https://goproxy.cn,direct
           CGO_ENABLED: 1
           CC: aarch64-linux-gnu-gcc
           CXX: aarch64-linux-gnu-g++
-          # 核心修正：通过 tags 彻底禁用掉报错的文件监听模块
-          XCADDY_GO_BUILD_FLAGS: "-tags 'nowatcher nobadger nomysql nopgx'"
+          CGO_CPPFLAGS: -I/home/runner/go/pkg/mod/github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be/watcher-go/wtr
+          CGO_CFLAGS: -I/home/runner/go/pkg/mod/github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be/watcher-go/wtr
         run: |
           ./xcaddy build v2.11.2 \
             --with github.com/dunglas/frankenphp/caddy \
@@ -97,6 +141,7 @@ jobs:
         run: |
           file ./caddy-arm64 || true
           ls -lh ./caddy-arm64 || true
+          sha256sum ./caddy-arm64 || true
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
@@ -105,10 +150,15 @@ jobs:
           path: ./caddy-arm64
           retention-days: 14
 
-      - name: Publish to GitHub Releases
+      - name: Publish to GitHub Releases (on main branch)
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           files: ./caddy-arm64
           tag_name: caddy-arm64-v$(./caddy-arm64 version --short 2>/dev/null | tr -d '\n\r' || echo "unknown")
           name: Custom Caddy ARM64 v2.11.1
+          draft: false
+          prerelease: false
+          body: |
+            Custom cross-compiled Caddy v2.11.2 for linux/arm64 (aarch64).
+            Built with xcaddy v0.4.5 on Go ${{ matrix.go_version }}.
