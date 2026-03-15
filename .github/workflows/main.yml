@@ -26,7 +26,6 @@ jobs:
           wget https://github.com/caddyserver/xcaddy/releases/download/v0.4.5/xcaddy_0.4.5_linux_amd64.tar.gz
           tar -xzf xcaddy_0.4.5_linux_amd64.tar.gz
           chmod +x xcaddy
-          ./xcaddy version
 
       - name: Clone Local Plugins
         env:
@@ -36,39 +35,12 @@ jobs:
           git clone https://github.com/W0n9/caddy_waf_t1k.git caddy_waf_t1k
           git clone https://github.com/chaitin/t1k-go.git t1k-go
 
-      - name: Clone and Fix e-dant/watcher Locally
-        run: |
-          echo "=== Patching e-dant/watcher locally (Struct & Signature Match) ==="
-          git clone https://github.com/e-dant/watcher.git watcher-src
-          cd watcher-src
-          mkdir -p watcher-go/wtr
-          # 必须定义 wtr_watcher_event 结构体，否则 CGO 无法解析 go_callback
-          cat > watcher-go/wtr/watcher-c.h << 'EOF'
-          #ifndef WTR_WATCHER_C_H
-          #define WTR_WATCHER_C_H
-
-          typedef void* watcher_t;
-
-          // 定义结构体以匹配 watcher.go 中的调用
-          struct wtr_watcher_event {
-              const char* path;
-              int type;
-          };
-
-          // 这里的回调函数签名必须严格匹配 go_callback 的定义
-          watcher_t wtr_watcher_open(const char* path, void (*callback)(struct wtr_watcher_event, void*), void* ctx);
-          void wtr_watcher_close(watcher_t w);
-
-          #endif
-          EOF
-          cd ..
-
       - name: Install ARM64 Cross Compiler
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config build-essential
 
-      - name: Build Custom Caddy ARM64 with FrankenPHP
+      - name: Build Custom Caddy ARM64 with FrankenPHP (No Watcher)
         env:
           GOOS: linux
           GOARCH: arm64
@@ -76,8 +48,8 @@ jobs:
           CGO_ENABLED: 1
           CC: aarch64-linux-gnu-gcc
           CXX: aarch64-linux-gnu-g++
-          CGO_CFLAGS: "-I${{ github.workspace }}/watcher-src/watcher-go"
-          CGO_CPPFLAGS: "-I${{ github.workspace }}/watcher-src/watcher-go"
+          # 核心修正：通过 tags 彻底禁用掉报错的文件监听模块
+          XCADDY_GO_BUILD_FLAGS: "-tags 'nowatcher nobadger nomysql nopgx'"
         run: |
           ./xcaddy build v2.11.2 \
             --with github.com/dunglas/frankenphp/caddy \
@@ -119,7 +91,6 @@ jobs:
             --replace github.com/W0n9/caddy_waf_t1k=./caddy_waf_t1k \
             --replace github.com/chaitin/t1k-go=./t1k-go \
             --replace github.com/hslatman/caddy-crowdsec-bouncer=./crowdsec-plugin \
-            --replace github.com/e-dant/watcher=./watcher-src \
             --output ./caddy-arm64
 
       - name: Show Build Result Info
