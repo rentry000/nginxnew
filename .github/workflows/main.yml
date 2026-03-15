@@ -1,4 +1,4 @@
-name: Build Custom Caddy ARM64 (Latest v2.11.1)
+Name: Build Custom Caddy ARM64 (Latest v2.11.1)
 
 on:
   push:
@@ -66,7 +66,6 @@ jobs:
             
             if [ ! -f "$WATCHER_PATH/watcher-go/wtr/watcher-c.h" ]; then
               echo "Creating dummy watcher-c.h with printf..."
-              # 使用 printf 单行输出，彻底避开 EOF 缩进引发的语法错误
               printf "/* Dummy header for ARM64 cross-compile */\n#ifndef WTR_WATCHER_C_H\n#define WTR_WATCHER_C_H\ntypedef void* watcher_t;\nwatcher_t watcher_new(const char* path);\nvoid watcher_destroy(watcher_t w);\n#endif\n" > "$WATCHER_PATH/watcher-go/wtr/watcher-c.h"
             fi
             
@@ -79,11 +78,14 @@ jobs:
       - name: Clean Go Module Cache
         run: go clean -modcache
 
-      - name: Install ARM64 Cross Compiler
+      - name: Install ARM64 Cross Compiler and Python Headers
         run: |
+          sudo dpkg --add-architecture arm64
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config build-essential
-          sudo apt-get install python3-dev build-essential pkg-config
+          # 核心修正：安装 arm64 架构的 python 编译环境
+          sudo apt-get install -y libpython3-dev:arm64 python3-all-dev:arm64
+
       - name: Build Custom Caddy ARM64 with FrankenPHP
         env:
           GOOS: linux
@@ -92,8 +94,11 @@ jobs:
           CGO_ENABLED: 1
           CC: aarch64-linux-gnu-gcc
           CXX: aarch64-linux-gnu-g++
-          CGO_CPPFLAGS: -I/home/runner/go/pkg/mod/github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be/watcher-go/wtr
-          CGO_CFLAGS: -I/home/runner/go/pkg/mod/github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be/watcher-go/wtr
+          # 修正 Python 头文件路径，动态指向 arm64 目录
+          PKG_CONFIG_PATH: /usr/lib/aarch64-linux-gnu/pkgconfig
+          CGO_CPPFLAGS: "-I/home/runner/go/pkg/mod/github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be/watcher-go/wtr -I/usr/include/python3.12"
+          CGO_CFLAGS: "-I/home/runner/go/pkg/mod/github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be/watcher-go/wtr -I/usr/include/aarch64-linux-gnu/python3.12"
+          CGO_LDFLAGS: "-L/usr/lib/aarch64-linux-gnu"
         run: |
           ./xcaddy build v2.11.2 \
             --with github.com/mliezun/caddy-snake \
