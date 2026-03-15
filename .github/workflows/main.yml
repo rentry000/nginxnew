@@ -38,18 +38,21 @@ jobs:
 
       - name: Clone and Fix e-dant/watcher Locally
         run: |
-          echo "=== Patching e-dant/watcher locally to avoid pkg/mod issues ==="
+          echo "=== Patching e-dant/watcher locally (Signature Match) ==="
           git clone https://github.com/e-dant/watcher.git watcher-src
           cd watcher-src
-          # 确保头文件结构正确
           mkdir -p watcher-go/wtr
-          # 写入完整的头文件定义，匹配实际代码调用的函数
+          # 修正头文件：wtr_watcher_open 必须接受 3 个参数以匹配 watcher.go 的调用
           cat > watcher-go/wtr/watcher-c.h << 'EOF'
           #ifndef WTR_WATCHER_C_H
           #define WTR_WATCHER_C_H
+
           typedef void* watcher_t;
-          watcher_t wtr_watcher_open(const char* path, void (*callback)(const char*));
+
+          // 第三个参数是 void* ctx，用于传递 Go 的上下文
+          watcher_t wtr_watcher_open(const char* path, void (*callback)(const char*, void*), void* ctx);
           void wtr_watcher_close(watcher_t w);
+
           #endif
           EOF
           cd ..
@@ -67,7 +70,6 @@ jobs:
           CGO_ENABLED: 1
           CC: aarch64-linux-gnu-gcc
           CXX: aarch64-linux-gnu-g++
-          # 指向本地克隆的修复目录
           CGO_CFLAGS: "-I${{ github.workspace }}/watcher-src/watcher-go"
           CGO_CPPFLAGS: "-I${{ github.workspace }}/watcher-src/watcher-go"
         run: |
