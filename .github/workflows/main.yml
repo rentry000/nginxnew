@@ -51,8 +51,9 @@ jobs:
 
       - name: Pre-download and Fix watcher-go Headers
         run: |
-          echo "=== Fixing watcher-c.h for ARM64 (printf patch) ==="
+          echo "=== Fixing watcher-c.h for ARM64 (Strict Path Patch) ==="
           go mod init dummy || true
+          # 强制拉取指定版本的源码
           go get github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be || true
           
           WATCHER_PATH=$(go list -m -f {{.Dir}} github.com/e-dant/watcher)
@@ -61,18 +62,17 @@ jobs:
           if [ -n "$WATCHER_PATH" ]; then
             sudo chmod -R +w "$WATCHER_PATH"
             
+            # 关键：创建 wtr 层级目录，使 #include <wtr/watcher-c.h> 能够匹配
             mkdir -p "$WATCHER_PATH/watcher-go/wtr"
-            cp -r "$WATCHER_PATH/include/wtr/"* "$WATCHER_PATH/watcher-go/wtr/" 2>/dev/null || true
             
-            if [ ! -f "$WATCHER_PATH/watcher-go/wtr/watcher-c.h" ]; then
-              echo "Creating dummy watcher-c.h with printf..."
-              printf "/* Dummy header for ARM64 cross-compile */\n#ifndef WTR_WATCHER_C_H\n#define WTR_WATCHER_C_H\ntypedef void* watcher_t;\nwatcher_t watcher_new(const char* path);\nvoid watcher_destroy(watcher_t w);\n#endif\n" > "$WATCHER_PATH/watcher-go/wtr/watcher-c.h"
-            fi
+            # 写入头文件内容
+            printf "/* Dummy header for ARM64 cross-compile */\n#ifndef WTR_WATCHER_C_H\n#define WTR_WATCHER_C_H\ntypedef void* watcher_t;\nwatcher_t watcher_new(const char* path);\nvoid watcher_destroy(watcher_t w);\n#endif\n" > "$WATCHER_PATH/watcher-go/wtr/watcher-c.h"
             
-            echo "watcher patch completed"
-            ls -l "$WATCHER_PATH/watcher-go/wtr/" || true
+            echo "Successfully created: $WATCHER_PATH/watcher-go/wtr/watcher-c.h"
+            ls -R "$WATCHER_PATH/watcher-go/wtr"
           else
-            echo "Watcher path not found!"
+            echo "Error: Watcher path not found!"
+            exit 1
           fi
 
       - name: Clean Go Module Cache
@@ -91,8 +91,9 @@ jobs:
           CGO_ENABLED: 1
           CC: aarch64-linux-gnu-gcc
           CXX: aarch64-linux-gnu-g++
-          CGO_CPPFLAGS: -I/home/runner/go/pkg/mod/github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be/watcher-go/wtr
-          CGO_CFLAGS: -I/home/runner/go/pkg/mod/github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be/watcher-go/wtr
+          # 修正：-I 路径指向包含 wtr 目录的父目录
+          CGO_CFLAGS: "-I/home/runner/go/pkg/mod/github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be/watcher-go"
+          CGO_CPPFLAGS: "-I/home/runner/go/pkg/mod/github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be/watcher-go"
         run: |
           ./xcaddy build v2.11.2 \
             --with github.com/dunglas/frankenphp/caddy \
