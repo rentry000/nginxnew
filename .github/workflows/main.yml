@@ -13,6 +13,24 @@ jobs:
         go_version: ["1.26"]
 
     steps:
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      # 使用 Docker 运行一个纯 ARM64 的容器环境进行编译
+      - name: Build in ARM64 Container
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e GOPROXY=https://goproxy.cn,direct \
+            -e CGO_ENABLED=1 \
+            ubuntu:24.04 /bin/bash -c "
+              apt-get update && \
+              apt-get install -y wget git gcc g++ libc6-dev python3-dev build-essential pkg-config golang && \
+              
+              
       - name: Checkout code
         uses: actions/checkout@v4
 
