@@ -83,28 +83,32 @@ jobs:
           # 1. 允许 arm64 架构
           sudo dpkg --add-architecture arm64
 
-          # 2. 移除可能导致 404 的微软/第三方源，并重写官方源
-          # 核心修复：强制 amd64 使用现有地址，arm64 使用专用 ports 地址
+          # 2. 彻底重写 sources.list，确保 amd64 和 arm64 分流
           sudo find /etc/apt/sources.list.d/ -type f -delete
-          
           cat <<EOF | sudo tee /etc/apt/sources.list
-          # AMD64 官方源
           deb [arch=amd64] http://archive.ubuntu.com/ubuntu noble main restricted universe multiverse
           deb [arch=amd64] http://archive.ubuntu.com/ubuntu noble-updates main restricted universe multiverse
           deb [arch=amd64] http://archive.ubuntu.com/ubuntu noble-backports main restricted universe multiverse
           deb [arch=amd64] http://security.ubuntu.com/ubuntu noble-security main restricted universe multiverse
 
-          # ARM64 官方 Ports 源
           deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble main restricted universe multiverse
           deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-backports main restricted universe multiverse
           deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-security main restricted universe multiverse
           EOF
 
-          # 3. 更新并安装依赖
+          # 3. 更新索引
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config build-essential
-          sudo apt-get install -y libpython3-dev:arm64 python3-all-dev:arm64
+
+          # 4. 安装编译器和 Python 开发头文件
+          # 使用 --no-install-recommends 避开 shim-signed 等引导程序冲突
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu \
+            libc6-dev-arm64-cross \
+            pkg-config \
+            build-essential \
+            libpython3.12-dev:arm64 \
+            libpython3.12:arm64
 
       - name: Build Custom Caddy ARM64 with FrankenPHP
         env:
