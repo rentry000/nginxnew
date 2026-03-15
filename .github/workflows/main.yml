@@ -21,7 +21,7 @@ jobs:
         with:
           platforms: arm64
 
-      - name: Build in Native ARM64 Environment
+      - name: Build in Alpine ARM64 (Musl libc for High Portability)
         run: |
           docker run --rm --platform linux/arm64 \
             -v ${{ github.workspace }}:/workspace \
@@ -31,23 +31,23 @@ jobs:
             -e CGO_ENABLED=1 \
             -e GOOS=linux \
             -e GOARCH=arm64 \
-            ubuntu:24.04 /bin/bash -c "
-              # 1. 安装基础工具
-              apt-get update && \
-              apt-get install -y wget git gcc g++ libc6-dev python3-dev libpython3.12-dev build-essential pkg-config golang-go && \
+            alpine:latest /bin/sh -c "
+              # 1. 安装 Alpine 轻量级编译依赖
+              apk update && \
+              apk add --no-cache go gcc g++ musl-dev python3-dev git wget linux-headers make && \
               
               # 2. 安装 xcaddy (ARM64)
               wget https://github.com/caddyserver/xcaddy/releases/download/v0.4.5/xcaddy_0.4.5_linux_arm64.tar.gz && \
               tar -xzf xcaddy_0.4.5_linux_arm64.tar.gz && \
               chmod +x xcaddy && \
 
-              # 3. 克隆插件
+              # 3. 克隆所有插件
               git clone https://\$GH_TOKEN@github.com/hslatman/caddy-crowdsec-bouncer.git crowdsec-plugin && \
               (cd crowdsec-plugin && git checkout main || true) && \
               git clone https://github.com/W0n9/caddy_waf_t1k.git caddy_waf_t1k && \
               git clone https://github.com/chaitin/t1k-go.git t1k-go && \
 
-              # 4. 预下载与 Patch Watcher
+              # 4. Patch Watcher-go 源码
               go mod init dummy || true && \
               go get github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be || true && \
               WATCHER_PATH=\$(go list -m -f {{.Dir}} github.com/e-dant/watcher) && \
@@ -57,11 +57,11 @@ jobs:
                 printf \"#ifndef WTR_WATCHER_C_H\n#define WTR_WATCHER_C_H\ntypedef void* watcher_t;\n#endif\n\" > \"\$WATCHER_PATH/watcher-go/wtr/watcher-c.h\"
               fi && \
 
-              # 5. 执行编译 (强制静态链接标记)
-              export CGO_CFLAGS=\"-I/usr/include/python3.12 -I/usr/include/aarch64-linux-gnu/python3.12\" && \
-              # 这里尝试链接 Python 静态库
-              export CGO_LDFLAGS=\"-L/usr/lib/aarch64-linux-gnu -lpython3.12 -lpthread -ldl -lutil -lm -static-libgcc\" && \
+              # 5. 动态获取 Python 头文件和链接库标志 (这是最稳妥的做法)
+              export CGO_CFLAGS=\$(python3-config --cflags) && \
+              export CGO_LDFLAGS=\$(python3-config --embed --ldflags || python3-config --ldflags) && \
               
+              # 6. 执行编译
               ./xcaddy build v2.11.2 \
                 --with github.com/mliezun/caddy-snake \
                 --with github.com/mholt/caddy-webdav \
