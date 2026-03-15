@@ -1,0 +1,131 @@
+name: Build Custom Caddy & FrankenPHP ARM64
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-caddy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Build in Alpine ARM64 (Musl libc) and Extract Dependencies
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e GH_TOKEN=${{ secrets.GITHUB_TOKEN_PAT }} \
+            -e GOPROXY=https://goproxy.cn,direct \
+            -e CGO_ENABLED=1 \
+            -e GOOS=linux \
+            -e GOARCH=arm64 \
+            alpine:latest /bin/sh -c "
+              # 1. 安装基础编译依赖 & FrankenPHP 所需的 PHP 开发包
+              apk update && \
+              apk add --no-cache go gcc g++ musl-dev python3-dev git wget linux-headers make \
+              php83-dev php83-embed php83-static php83-common \
+              libxml2-dev brotli-dev libucontext-dev && \
+              
+              # 2. 安装 xcaddy (ARM64)
+              wget https://github.com/caddyserver/xcaddy/releases/download/v0.4.5/xcaddy_0.4.5_linux_arm64.tar.gz && \
+              tar -xzf xcaddy_0.4.5_linux_arm64.tar.gz && \
+              chmod +x xcaddy && \
+
+              # 3. 克隆原本的插件
+              git clone https://\$GH_TOKEN@github.com/hslatman/caddy-crowdsec-bouncer.git crowdsec-plugin && \
+              (cd crowdsec-plugin && git checkout main || true) && \
+              git clone https://github.com/W0n9/caddy_waf_t1k.git caddy_waf_t1k && \
+              git clone https://github.com/chaitin/t1k-go.git t1k-go && \
+
+              # 4. Patch Watcher-go (解决 caddy-snake 或 frankenphp 可能引起的依赖冲突)
+              go mod init dummy || true && \
+              go get github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be || true && \
+              WATCHER_PATH=\$(go list -m -f {{.Dir}} github.com/e-dant/watcher) && \
+              if [ -n \"\$WATCHER_PATH\" ]; then
+                mkdir -p \"\$WATCHER_PATH/watcher-go/wtr\" && \
+                cp -r \"\$WATCHER_PATH/include/wtr/\"* \"\$WATCHER_PATH/watcher-go/wtr/\" 2>/dev/null || true && \
+                printf \"#ifndef WTR_WATCHER_C_H\n#define WTR_WATCHER_C_H\ntypedef void* watcher_t;\n#endif\n\" > \"\$WATCHER_PATH/watcher-go/wtr/watcher-c.h\"
+              fi && \
+
+              # 5. 设置 CGO 标志（合并 Python 与 PHP 编译参数）
+              # 我们通过 -tags nowatcher 规避由于多层嵌入导致的文件监听冲突
+              export XCADDY_GO_BUILD_FLAGS='-tags=nowatcher,nobadger,nomysql,nopgx' && \
+              export CGO_CFLAGS=\"\$(python3-config --cflags) \$(php-config83 --includes)\" && \
+              export CGO_LDFLAGS=\"\$(python3-config --embed --ldflags || python3-config --ldflags) \$(php-config83 --ldflags) \$(php-config83 --libs)\" && \
+              
+              # 6. 执行编译 (加入 FrankenPHP 官方插件地址)
+              ./xcaddy build v2.11.2 \
+                --with github.com/dunglas/frankenphp/caddy \
+                --with github.com/mliezun/caddy-snake \
+                --with github.com/mholt/caddy-webdav \
+                --with github.com/caddy-dns/route53@v1.6.0 \
+                --with github.com/caddyserver/replace-response \
+                --with github.com/caddyserver/transform-encoder \
+                --with github.com/caddyserver/cache-handler \
+                --with github.com/caddy-dns/cloudflare \
+                --with github.com/caddy-dns/duckdns \
+                --with github.com/greenpau/caddy-security \
+                --with github.com/mholt/caddy-l4 \
+                --with github.com/caddyserver/nginx-adapter \
+                --with github.com/caddyserver/ntlm-transport \
+                --with github.com/mholt/caddy-dynamicdns \
+                --with github.com/sagikazarmark/caddy-fs-s3 \
+                --with github.com/ueffel/caddy-brotli \
+                --with github.com/corazawaf/coraza-caddy/v2 \
+                --with github.com/mholt/caddy-ratelimit \
+                --with github.com/invzhi/caddy-docker-upstreams \
+                --with github.com/hslatman/caddy-crowdsec-bouncer \
+                --with github.com/mholt/caddy-events-exec \
+                --with github.com/caddyserver/forwardproxy \
+                --with github.com/kirsch33/realip \
+                --with github.com/sjtug/caddy2-filter \
+                --with github.com/lucaslorentz/caddy-docker-proxy/v2 \
+                --with github.com/caddyserver/circuitbreaker \
+                --with github.com/caddyserver/jsonc-adapter \
+                --with github.com/caddyserver/json5-adapter \
+                --with github.com/SakuraHentai/caddy-dynamic-routing \
+                --with github.com/ysicing/caddy2-geocn \
+                --with github.com/steffenbusch/caddy-placeholder-dump \
+                --with github.com/hslatman/caddy-crowdsec-bouncer/appsec \
+                --with github.com/hslatman/caddy-crowdsec-bouncer/layer4 \
+                --with github.com/libdns/cloudflare \
+                --with github.com/porech/caddy-maxmind-geolocation \
+                --with github.com/hslatman/caddy-crowdsec-bouncer/http \
+                --with pkg.jsn.cam/caddy-defender@v0.10.0 \
+                --replace github.com/W0n9/caddy_waf_t1k=./caddy_waf_t1k \
+                --replace github.com/chaitin/t1k-go=./t1k-go \
+                --replace github.com/hslatman/caddy-crowdsec-bouncer=./crowdsec-plugin \
+                --output ./caddy-arm64 && \
+
+              # 7. 开始提取依赖库并打包
+              echo '=== 开始提取动态链接库 ===' && \
+              mkdir -p ./caddy-bundle/lib && \
+              mv ./caddy-arm64 ./caddy-bundle/ && \
+              
+              # 自动追踪 libphp83.so, libpython3.so, libxml2.so 等所有依赖
+              ldd ./caddy-bundle/caddy-arm64 | grep '=> /' | awk '{print \$3}' | xargs -I '{}' cp -L '{}' ./caddy-bundle/lib/ || true && \
+              cp /lib/ld-musl-aarch64.so.1 ./caddy-bundle/lib/ || true && \
+              
+              # 创建 run.sh
+              echo '#!/bin/sh' > ./caddy-bundle/run.sh && \
+              echo 'DIR=\"\$(cd \"\$(dirname \"\$0\")\" && pwd)\"' >> ./caddy-bundle/run.sh && \
+              echo 'export LD_LIBRARY_PATH=\"\$DIR/lib:\$LD_LIBRARY_PATH\"' >> ./caddy-bundle/run.sh && \
+              echo 'exec \"\$DIR/lib/ld-musl-aarch64.so.1\" -- \"\$DIR/caddy-arm64\" \"\$@\"' >> ./caddy-bundle/run.sh && \
+              
+              chmod +x ./caddy-bundle/run.sh ./caddy-bundle/caddy-arm64 ./caddy-bundle/lib/ld-musl-aarch64.so.1 && \
+              tar -czvf caddy-arm64-bundle.tar.gz ./caddy-bundle
+            "
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: caddy-frankenphp-arm64
+          path: caddy-arm64-bundle.tar.gz
