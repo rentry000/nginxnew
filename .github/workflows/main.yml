@@ -28,52 +28,36 @@ jobs:
           chmod +x xcaddy
           ./xcaddy version
 
-      - name: Clone CrowdSec Plugin
+      - name: Clone Local Plugins
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN_PAT }}
         run: |
           git clone https://$GH_TOKEN@github.com/hslatman/caddy-crowdsec-bouncer.git crowdsec-plugin
-          cd crowdsec-plugin
-          git checkout main || true
-          cd ..
-
-      - name: Clone W0n9/caddy_waf_t1k and chaitin/t1k-go Locally
-        run: |
           git clone https://github.com/W0n9/caddy_waf_t1k.git caddy_waf_t1k
           git clone https://github.com/chaitin/t1k-go.git t1k-go
+
+      - name: Clone and Fix e-dant/watcher Locally
+        run: |
+          echo "=== Patching e-dant/watcher locally to avoid pkg/mod issues ==="
+          git clone https://github.com/e-dant/watcher.git watcher-src
+          cd watcher-src
+          # 确保头文件结构正确
+          mkdir -p watcher-go/wtr
+          # 写入完整的头文件定义，匹配实际代码调用的函数
+          cat > watcher-go/wtr/watcher-c.h << 'EOF'
+          #ifndef WTR_WATCHER_C_H
+          #define WTR_WATCHER_C_H
+          typedef void* watcher_t;
+          watcher_t wtr_watcher_open(const char* path, void (*callback)(const char*));
+          void wtr_watcher_close(watcher_t w);
+          #endif
+          EOF
+          cd ..
 
       - name: Install ARM64 Cross Compiler
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config build-essential
-
-      - name: Pre-download and Fix watcher-go Headers
-        run: |
-          echo "=== Fixing watcher-c.h for ARM64 (Persistent Patch) ==="
-          # 先让 go 下载模块，不要初始化 dummy mod，直接通过 go get
-          go mod init build_fix || true
-          go get github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be || true
-          
-          # 获取实际下载路径
-          WATCHER_PATH=$(go list -m -f {{.Dir}} github.com/e-dant/watcher)
-          echo "Watcher path: $WATCHER_PATH"
-          
-          if [ -n "$WATCHER_PATH" ]; then
-            sudo chmod -R +w "$WATCHER_PATH"
-            # 创建符合 #include <wtr/watcher-c.h> 的结构
-            mkdir -p "$WATCHER_PATH/watcher-go/wtr"
-            
-            # 使用 printf 写入头文件
-            printf "/* Dummy header for ARM64 cross-compile */\n#ifndef WTR_WATCHER_C_H\n#define WTR_WATCHER_C_H\ntypedef void* watcher_t;\nwatcher_t watcher_new(const char* path);\nvoid watcher_destroy(watcher_t w);\n#endif\n" > "$WATCHER_PATH/watcher-go/wtr/watcher-c.h"
-            
-            # 同时也往父目录写一份以防万一
-            mkdir -p "$WATCHER_PATH/wtr"
-            cp "$WATCHER_PATH/watcher-go/wtr/watcher-c.h" "$WATCHER_PATH/wtr/watcher-c.h"
-            
-            echo "Patch applied successfully to $WATCHER_PATH"
-          else
-            echo "Watcher directory not found, will rely on CGO_CFLAGS"
-          fi
 
       - name: Build Custom Caddy ARM64 with FrankenPHP
         env:
@@ -83,11 +67,10 @@ jobs:
           CGO_ENABLED: 1
           CC: aarch64-linux-gnu-gcc
           CXX: aarch64-linux-gnu-g++
-          # 指向补丁所在目录
-          CGO_CFLAGS: "-I/home/runner/go/pkg/mod/github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be/watcher-go"
-          CGO_CPPFLAGS: "-I/home/runner/go/pkg/mod/github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be/watcher-go"
+          # 指向本地克隆的修复目录
+          CGO_CFLAGS: "-I${{ github.workspace }}/watcher-src/watcher-go"
+          CGO_CPPFLAGS: "-I${{ github.workspace }}/watcher-src/watcher-go"
         run: |
-          # 注意：这里不再运行 go clean -modcache，否则补丁会被删掉
           ./xcaddy build v2.11.2 \
             --with github.com/dunglas/frankenphp/caddy \
             --with github.com/mholt/caddy-webdav \
@@ -128,6 +111,7 @@ jobs:
             --replace github.com/W0n9/caddy_waf_t1k=./caddy_waf_t1k \
             --replace github.com/chaitin/t1k-go=./t1k-go \
             --replace github.com/hslatman/caddy-crowdsec-bouncer=./crowdsec-plugin \
+            --replace github.com/e-dant/watcher=./watcher-src \
             --output ./caddy-arm64
 
       - name: Show Build Result Info
@@ -140,6 +124,7 @@ jobs:
         with:
           name: caddy-arm64-custom-v2.11.1
           path: ./caddy-arm64
+          retention-days: 14
 
       - name: Publish to GitHub Releases
         if: github.ref == 'refs/heads/main'
