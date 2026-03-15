@@ -66,7 +66,6 @@ jobs:
             
             if [ ! -f "$WATCHER_PATH/watcher-go/wtr/watcher-c.h" ]; then
               echo "Creating dummy watcher-c.h with printf..."
-              # 使用 printf 单行输出，彻底避开 EOF 缩进引发的语法错误
               printf "/* Dummy header for ARM64 cross-compile */\n#ifndef WTR_WATCHER_C_H\n#define WTR_WATCHER_C_H\ntypedef void* watcher_t;\nwatcher_t watcher_new(const char* path);\nvoid watcher_destroy(watcher_t w);\n#endif\n" > "$WATCHER_PATH/watcher-go/wtr/watcher-c.h"
             fi
             
@@ -88,7 +87,7 @@ jobs:
         env:
           GOOS: linux
           GOARCH: arm64
-          GOPROXY: https://goproxy.cn,direct
+          GOPROXY: https://proxy.golang.org,direct
           CGO_ENABLED: 1
           CC: aarch64-linux-gnu-gcc
           CXX: aarch64-linux-gnu-g++
