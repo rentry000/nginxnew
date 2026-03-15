@@ -21,7 +21,7 @@ jobs:
         with:
           platforms: arm64
 
-      - name: Build in Alpine ARM64 (Musl libc for High Portability)
+      - name: Build in Alpine ARM64 (Musl libc) and Extract Dependencies
         run: |
           docker run --rm --platform linux/arm64 \
             -v ${{ github.workspace }}:/workspace \
@@ -57,7 +57,7 @@ jobs:
                 printf \"#ifndef WTR_WATCHER_C_H\n#define WTR_WATCHER_C_H\ntypedef void* watcher_t;\n#endif\n\" > \"\$WATCHER_PATH/watcher-go/wtr/watcher-c.h\"
               fi && \
 
-              # 5. 动态获取 Python 头文件和链接库标志 (这是最稳妥的做法)
+              # 5. 动态获取 Python 头文件和链接库标志
               export CGO_CFLAGS=\$(python3-config --cflags) && \
               export CGO_LDFLAGS=\$(python3-config --embed --ldflags || python3-config --ldflags) && \
               
@@ -102,16 +102,59 @@ jobs:
                 --replace github.com/W0n9/caddy_waf_t1k=./caddy_waf_t1k \
                 --replace github.com/chaitin/t1k-go=./t1k-go \
                 --replace github.com/hslatman/caddy-crowdsec-bouncer=./crowdsec-plugin \
-                --output ./caddy-arm64
+                --output ./caddy-arm64 && \
+
+              # ==========================================
+              # 7. 开始提取依赖库并打包 (新增核心逻辑)
+              # ==========================================
+              echo '=== 开始提取动态链接库 ===' && \
+              mkdir -p ./caddy-bundle/lib && \
+              mv ./caddy-arm64 ./caddy-bundle/ && \
+              
+              # 使用 ldd 找出所有依赖的 .so 文件并复制到 lib 目录
+              ldd ./caddy-bundle/caddy-arm64 | grep '=> /' | awk '{print \$3}' | xargs -I '{}' cp '{}' ./caddy-bundle/lib/ || true && \
+              
+              # 单独拷贝 musl 动态链接器（通常在 ldd 格式中不带 '=>'）
+              cp /lib/ld-musl-aarch64.so.1 ./caddy-bundle/lib/ || true && \
+              
+              # 创建万能启动脚本 run.sh
+              echo '#!/bin/sh' > ./caddy-bundle/run.sh && \
+              echo 'DIR=\"\$(cd \"\$(dirname \"\$0\")\" && pwd)\"' >> ./caddy-bundle/run.sh && \
+              echo 'export LD_LIBRARY_PATH=\"\$DIR/lib:\$LD_LIBRARY_PATH\"' >> ./caddy-bundle/run.sh && \
+              echo 'exec \"\$DIR/lib/ld-musl-aarch64.so.1\" -- \"\$DIR/caddy-arm64\" \"\$@\"' >> ./caddy-bundle/run.sh && \
+              
+              # 赋予执行权限并压缩打包
+              chmod +x ./caddy-bundle/run.sh ./caddy-bundle/caddy-arm64 ./caddy-bundle/lib/ld-musl-aarch64.so.1 && \
+              tar -czvf caddy-arm64-bundle.tar.gz ./caddy-bundle
             "
 
       - name: Show Build Result Info
         run: |
-          file ./caddy-arm64
-          ls -lh ./caddy-arm64
+          ls -lh caddy-arm64-bundle.tar.gz
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: caddy-arm64-custom
-          path: ./caddy-arm64
+          name: caddy-arm64-bundle
+          path: caddy-arm64-bundle.tar.gz
+          retention-days: 14
+
+      - name: Publish to GitHub Releases (on main branch)
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: caddy-arm64-bundle.tar.gz
+          tag_name: caddy-arm64-bundle-v2.11.1
+          name: Custom Caddy ARM64 Bundle v2.11.1
+          draft: false
+          prerelease: false
+          body: |
+            Custom cross-compiled Caddy v2.11.2 for linux/arm64 (Alpine musl).
+            **包含完整的 Python 和 Musl libc 运行库依赖**，专为 Android (Magisk/Termux) 等缺少原生依赖的环境设计。
+            
+            ### 食用方法：
+            1. 下载解压 `caddy-arm64-bundle.tar.gz`
+            2. 进入 `caddy-bundle` 目录
+            3. 使用 `./run.sh` 代替原本的 `caddy` 命令执行，例如：
+               `./run.sh version`
+               `./run.sh run --config /path/to/Caddyfile`
