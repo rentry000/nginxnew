@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-caddy:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         go_version: ["1.25"]
@@ -40,53 +40,56 @@ jobs:
       - name: Clone W0n9/caddy_waf_t1k and chaitin/t1k-go Locally
         run: |
           git clone https://github.com/W0n9/caddy_waf_t1k.git caddy_waf_t1k
+          cd caddy_waf_t1k
+          git checkout master || true
+          cd ..
+
           git clone https://github.com/chaitin/t1k-go.git t1k-go
-          
-      - name: Setup Multi-arch & Install ARM64 Dependencies
-        run: |
-          sudo dpkg --add-architecture arm64
-          # 仅对原有的 amd64 源加限制，避免 arm64 404 错误
-          sudo sed -i 's/^deb http/deb [arch=amd64] http/g' /etc/apt/sources.list
-          sudo bash -c 'cat <<EOF > /etc/apt/sources.list.d/arm64.list
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ jammy main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ jammy-updates main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ jammy-security main restricted universe multiverse
-          EOF'
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config build-essential
-          sudo apt-get install -y libpython3-dev:arm64 python3-dev:arm64
+          cd t1k-go
+          git checkout master || true
+          cd ..
 
       - name: Pre-download and Fix watcher-go Headers
         run: |
-          echo "=== Fixing watcher-c.h for ARM64 ==="
+          echo "=== Fixing watcher-c.h for ARM64 (strong patch) ==="
           go mod init dummy || true
           go get github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be || true
           
           WATCHER_PATH=$(go list -m -f {{.Dir}} github.com/e-dant/watcher)
-          if [ -z "$WATCHER_PATH" ]; then
-             WATCHER_PATH="/home/runner/go/pkg/mod/github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be"
-          fi
-          
           echo "Watcher path: $WATCHER_PATH"
-          sudo chmod -R +w "$WATCHER_PATH"
-          mkdir -p "$WATCHER_PATH/watcher-go/wtr"
           
-          # 尝试复制原始头文件
-          cp -r "$WATCHER_PATH/include/wtr/"* "$WATCHER_PATH/watcher-go/wtr/" 2>/dev/null || true
-          
-          # 写入备用头文件 (注意：EOF 必须顶格)
-          cat > "$WATCHER_PATH/watcher-go/wtr/watcher-c.h" << 'EOF'
-          #ifndef WTR_WATCHER_C_H
-          #define WTR_WATCHER_C_H
-          typedef void* watcher_t;
-          watcher_t watcher_new(const char* path);
-          void watcher_destroy(watcher_t w);
-          #endif
-          EOF
-          echo "watcher patch completed"
+          if [ -n "$WATCHER_PATH" ]; then
+            sudo chmod -R +w "$WATCHER_PATH"
+            
+            mkdir -p "$WATCHER_PATH/watcher-go/wtr"
+            cp -r "$WATCHER_PATH/include/wtr/"* "$WATCHER_PATH/watcher-go/wtr/" 2>/dev/null || true
+            
+            if [ ! -f "$WATCHER_PATH/watcher-go/wtr/watcher-c.h" ]; then
+              echo "Creating dummy watcher-c.h ..."
+              cat > "$WATCHER_PATH/watcher-go/wtr/watcher-c.h" << 'EOF'
+            /* Dummy header for ARM64 cross-compile */
+            #ifndef WTR_WATCHER_C_H
+            #define WTR_WATCHER_C_H
+            typedef void* watcher_t;
+            watcher_t watcher_new(const char* path);
+            void watcher_destroy(watcher_t w);
+            #endif
+            EOF
+            fi
+            
+            echo "watcher patch completed"
+            ls -l "$WATCHER_PATH/watcher-go/wtr/" || true
+          else
+            echo "Watcher path not found!"
+          fi
 
       - name: Clean Go Module Cache
         run: go clean -modcache
+
+      - name: Install ARM64 Cross Compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config build-essential
 
       - name: Build Custom Caddy ARM64 with FrankenPHP
         env:
@@ -96,9 +99,8 @@ jobs:
           CGO_ENABLED: 1
           CC: aarch64-linux-gnu-gcc
           CXX: aarch64-linux-gnu-g++
-          # 指向刚才补全头文件的路径
-          CGO_CFLAGS: "-I/home/runner/go/pkg/mod/github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be/watcher-go"
-          PKG_CONFIG_PATH: /usr/lib/aarch64-linux-gnu/pkgconfig
+          CGO_CPPFLAGS: -I/home/runner/go/pkg/mod/github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be/watcher-go/wtr
+          CGO_CFLAGS: -I/home/runner/go/pkg/mod/github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be/watcher-go/wtr
         run: |
           ./xcaddy build v2.11.2 \
             --with github.com/dunglas/frankenphp/caddy \
@@ -134,7 +136,6 @@ jobs:
             --with github.com/hslatman/caddy-crowdsec-bouncer/appsec \
             --with github.com/hslatman/caddy-crowdsec-bouncer/layer4 \
             --with github.com/libdns/cloudflare \
-            --with github.com/mliezun/caddy-snake \
             --with github.com/porech/caddy-maxmind-geolocation \
             --with github.com/hslatman/caddy-crowdsec-bouncer/http \
             --with pkg.jsn.cam/caddy-defender@v0.10.0 \
@@ -147,17 +148,24 @@ jobs:
         run: |
           file ./caddy-arm64 || true
           ls -lh ./caddy-arm64 || true
+          sha256sum ./caddy-arm64 || true
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: caddy-arm64-v2.11.2
+          name: caddy-arm64-custom-v2.11.1
           path: ./caddy-arm64
+          retention-days: 14
 
-      - name: Publish to GitHub Releases
+      - name: Publish to GitHub Releases (on main branch)
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           files: ./caddy-arm64
-          tag_name: v2.11.2-arm64-${{ github.run_id }}
-          name: Custom Caddy ARM64 v2.11.2
+          tag_name: caddy-arm64-v$(./caddy-arm64 version --short 2>/dev/null | tr -d '\n\r' || echo "unknown")
+          name: Custom Caddy ARM64 v2.11.1
+          draft: false
+          prerelease: false
+          body: |
+            Custom cross-compiled Caddy v2.11.2 for linux/arm64 (aarch64).
+            Built with xcaddy v0.4.5 on Go ${{ matrix.go_version }}.
