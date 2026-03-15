@@ -83,7 +83,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config build-essential
-
+          sudo apt-get install python3-dev build-essential pkg-config
       - name: Build Custom Caddy ARM64 with FrankenPHP
         env:
           GOOS: linux
@@ -96,7 +96,7 @@ jobs:
           CGO_CFLAGS: -I/home/runner/go/pkg/mod/github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be/watcher-go/wtr
         run: |
           ./xcaddy build v2.11.2 \
-            --with github.com/dunglas/frankenphp/caddy \
+            --with github.com/mliezun/caddy-snake \
             --with github.com/mholt/caddy-webdav \
             --with github.com/caddy-dns/route53@v1.6.0 \
             --with github.com/caddyserver/replace-response \
