@@ -83,21 +83,25 @@ jobs:
           # 1. 允许 arm64 架构
           sudo dpkg --add-architecture arm64
 
-          # 2. 彻底重写 sources.list，避免 404 错误
-          # 将原本的源限制为只允许 [arch=amd64]
-          sudo sed -i 's/^deb http/deb [arch=amd64] http/' /etc/apt/sources.list
-          sudo sed -i 's/^deb-src http/deb-src [arch=amd64] http/' /etc/apt/sources.list
+          # 2. 移除可能导致 404 的微软/第三方源，并重写官方源
+          # 核心修复：强制 amd64 使用现有地址，arm64 使用专用 ports 地址
+          sudo find /etc/apt/sources.list.d/ -type f -delete
+          
+          cat <<EOF | sudo tee /etc/apt/sources.list
+          # AMD64 官方源
+          deb [arch=amd64] http://archive.ubuntu.com/ubuntu noble main restricted universe multiverse
+          deb [arch=amd64] http://archive.ubuntu.com/ubuntu noble-updates main restricted universe multiverse
+          deb [arch=amd64] http://archive.ubuntu.com/ubuntu noble-backports main restricted universe multiverse
+          deb [arch=amd64] http://security.ubuntu.com/ubuntu noble-security main restricted universe multiverse
 
-          # 3. 添加针对 arm64 的官方 ports 源 (必须使用 http://ports.ubuntu.com/)
-          # 注意：GitHub Runner 环境是 Noble (24.04)
-          cat <<EOF | sudo tee -a /etc/apt/sources.list
+          # ARM64 官方 Ports 源
           deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble main restricted universe multiverse
           deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-security main restricted universe multiverse
           deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-backports main restricted universe multiverse
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-security main restricted universe multiverse
           EOF
 
-          # 4. 更新并安装依赖
+          # 3. 更新并安装依赖
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config build-essential
           sudo apt-get install -y libpython3-dev:arm64 python3-all-dev:arm64
@@ -110,11 +114,12 @@ jobs:
           CGO_ENABLED: 1
           CC: aarch64-linux-gnu-gcc
           CXX: aarch64-linux-gnu-g++
-          # 修正 Python 头文件路径，动态指向 arm64 目录
+          # 关键点：xcaddy 并不直接识别 CGO 变量，有些需要传递给编译环境
+          # 修正 Python 路径到 aarch64 专用位置
           PKG_CONFIG_PATH: /usr/lib/aarch64-linux-gnu/pkgconfig
-          CGO_CPPFLAGS: "-I/home/runner/go/pkg/mod/github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be/watcher-go/wtr -I/usr/include/python3.12"
-          CGO_CFLAGS: "-I/home/runner/go/pkg/mod/github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be/watcher-go/wtr -I/usr/include/aarch64-linux-gnu/python3.12"
-          CGO_LDFLAGS: "-L/usr/lib/aarch64-linux-gnu"
+          CGO_CPPFLAGS: "-I/home/runner/go/pkg/mod/github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be/watcher-go/wtr -I/usr/include/python3.12 -I/usr/include/aarch64-linux-gnu/python3.12"
+          CGO_CFLAGS: "-I/home/runner/go/pkg/mod/github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be/watcher-go/wtr -I/usr/include/python3.12 -I/usr/include/aarch64-linux-gnu/python3.12"
+          CGO_LDFLAGS: "-L/usr/lib/aarch64-linux-gnu -lpython3.12"
         run: |
           ./xcaddy build v2.11.2 \
             --with github.com/mliezun/caddy-snake \
