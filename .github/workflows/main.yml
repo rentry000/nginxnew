@@ -36,6 +36,12 @@ jobs:
               brotli-dev argon2-dev libedit-dev \
               php83-dev php83-embed acl-dev && \
               
+              # 【修复 1】：动态获取 Alpine 实际安装的 libphpXX.so 并建立 libphp.so 软链接
+              echo '=== 修复 -lphp 链接问题 ===' && \
+              PHP_REAL_LIB=\$(find /usr/lib -name \"libphp*.so\" | head -n 1) && \
+              ln -sf \$PHP_REAL_LIB /usr/lib/libphp.so && \
+              ls -l /usr/lib/libphp.so && \
+              
               # 2. 安装 xcaddy
               wget https://github.com/caddyserver/xcaddy/releases/download/v0.4.5/xcaddy_0.4.5_linux_arm64.tar.gz && \
               tar -xzf xcaddy_0.4.5_linux_arm64.tar.gz && \
@@ -55,10 +61,14 @@ jobs:
               cp -rv local-watcher/include/wtr/* local-watcher/watcher-go/wtr/ && \
               cp -f local-watcher/watcher-c/include/wtr/watcher-c.h local-watcher/watcher-go/wtr/watcher-c.h && \
               
-              # 只复制库源码，排除所有 test 和 main 文件（关键修复！）
+              # 只复制库源码，排除所有 test 和 main 文件
               echo '=== 排除 test/main 文件 ===' && \
               find local-watcher/src -name \"*.cpp\" -o -name \"*.hpp\" -o -name \"*.c\" 2>/dev/null | grep -Ev '(test|main)' | xargs -I {} cp -f {} local-watcher/watcher-go/ || true && \
               find local-watcher/watcher-c -name \"*.cpp\" -o -name \"*.c\" 2>/dev/null | grep -Ev '(test|main)' | xargs -I {} cp -f {} local-watcher/watcher-go/ || true && \
+              
+              # 【修复 2】：抹除 Go 源码中硬编码的动态库链接，因为我们已经在本地平铺编译了
+              echo '=== 抹除硬编码的 -lwatcher-c ===' && \
+              find local-watcher/watcher-go -name \"*.go\" -exec sed -i 's/-lwatcher-c//g' {} + && \
               
               ls -l local-watcher/watcher-go/wtr/watcher-c.h local-watcher/watcher-go/*.cpp 2>/dev/null | head -10 && \
               
