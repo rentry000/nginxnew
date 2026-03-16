@@ -10,7 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # 核心修复：提升 Go 版本以满足 FrankenPHP v1.12.1 的要求 (>= 1.26.0)
         go_version: ["1.26"]
 
     steps:
@@ -33,8 +32,7 @@ jobs:
             -e GOOS=linux \
             -e GOARCH=arm64 \
             alpine:latest /bin/sh -c "
-              # 1. 安装 Alpine 编译依赖
-              # 注意：为了配合 Go 1.26，我们使用 edge 仓库或确保安装最新的 go 包
+              # 1. 安装 Alpine 编译依赖 (包含 Go 1.26)
               apk update && \
               apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community go && \
               apk add --no-cache gcc g++ musl-dev python3-dev git wget linux-headers make \
@@ -47,27 +45,32 @@ jobs:
               tar -xzf xcaddy_0.4.5_linux_arm64.tar.gz && \
               chmod +x xcaddy && \
 
-              # 3. 克隆插件及准备工作
+              # 3. 克隆插件
               git clone https://\$GH_TOKEN@github.com/hslatman/caddy-crowdsec-bouncer.git crowdsec-plugin && \
               (cd crowdsec-plugin && git checkout main || true) && \
               git clone https://github.com/W0n9/caddy_waf_t1k.git caddy_waf_t1k && \
               git clone https://github.com/chaitin/t1k-go.git t1k-go && \
 
-              # 4. 【核心修复】：建立 Watcher 源码本地修补副本
-              echo '=== 修补 Watcher 源码负载 ===' && \
+              # 4. 【核心修复】：彻底重塑 Watcher 编译环境
+              echo '=== 深度修补 Watcher 源码 ===' && \
               git clone --depth 1 https://github.com/e-dant/watcher.git local-watcher && \
               cd local-watcher && \
+              # 关键：创建 wtr 目录并将 include 下的所有 C/C++ 源码拷入，确保 CGO 能链接到实现
               mkdir -p watcher-go/wtr && \
               cp -r include/wtr/* watcher-go/wtr/ && \
+              # 如果 include 里有实现文件 (.cpp)，也要确保它们在 watcher-go 的搜索路径下
+              find include -name '*.cpp' -exec cp {} watcher-go/wtr/ \; || true && \
+              # 写入修正后的 C 接口头文件
               printf \"#ifndef WTR_WATCHER_C_H\n#define WTR_WATCHER_C_H\ntypedef void* watcher_t;\n#endif\n\" > watcher-go/wtr/watcher-c.h && \
               cd .. && \
 
-              # 5. 动态获取 PHP 和 Python 的编译标志
+              # 5. 设置 CGO 标志 (增加针对 C++ 的支持)
               PHP_INC=\$(find /usr/include -name \"php\" -type d | head -n 1) && \
               export CGO_CFLAGS=\"\$(python3-config --cflags) -I\$PHP_INC -I\$PHP_INC/main -I\$PHP_INC/TSRM -I\$PHP_INC/Zend\" && \
-              export CGO_LDFLAGS=\"\$(python3-config --embed --ldflags || python3-config --ldflags) -lphp83\" && \
+              export CGO_LDFLAGS=\"\$(python3-config --embed --ldflags || python3-config --ldflags) -lphp83 -lstdc++\" && \
+              export CXX=g++ && \
               
-              # 6. 执行编译 (满足 Go 1.26 条件)
+              # 6. 执行编译
               ./xcaddy build v2.11.2 \
                 --with github.com/dunglas/frankenphp/caddy \
                 --with github.com/mliezun/caddy-snake \
@@ -113,7 +116,7 @@ jobs:
                 --output ./caddy-arm64 && \
 
               # 7. 提取依赖库并打包
-              echo '=== 开始提取动态链接库 ===' && \
+              echo '=== 开始提取运行库 ===' && \
               mkdir -p ./caddy-bundle/lib && \
               mv ./caddy-arm64 ./caddy-bundle/ && \
               ( ldd ./caddy-bundle/caddy-arm64 | grep '=> /' | awk '{print \$3}' | xargs -I '{}' cp '{}' ./caddy-bundle/lib/ || true ) && \
@@ -123,7 +126,6 @@ jobs:
               echo 'DIR=\"\$(cd \"\$(dirname \"\$0\")\" && pwd)\"' >> ./caddy-bundle/run.sh && \
               echo 'export LD_LIBRARY_PATH=\"\$DIR/lib:\$LD_LIBRARY_PATH\"' >> ./caddy-bundle/run.sh && \
               echo 'exec \"\$DIR/lib/ld-musl-aarch64.so.1\" -- \"\$DIR/caddy-arm64\" \"\$@\"' >> ./caddy-bundle/run.sh && \
-              
               chmod +x ./caddy-bundle/run.sh ./caddy-bundle/caddy-arm64 ./caddy-bundle/lib/ld-musl-aarch64.so.1 && \
               tar -czvf caddy-arm64-bundle.tar.gz ./caddy-bundle
             "
@@ -136,14 +138,3 @@ jobs:
         with:
           name: caddy-arm64-bundle
           path: caddy-arm64-bundle.tar.gz
-
-      - name: Publish to GitHub Releases
-        if: github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: caddy-arm64-bundle.tar.gz
-          tag_name: caddy-arm64-frankenphp-v2.11.2
-          name: Custom Caddy ARM64 (FrankenPHP + Python) v2.11.2
-          body: |
-            集成 FrankenPHP + Python (caddy-snake) + Coraza WAF + CrowdSec。
-            使用 Go 1.26 编译以适配最新 FrankenPHP 插件要求。
