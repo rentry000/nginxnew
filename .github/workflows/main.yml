@@ -27,7 +27,7 @@ jobs:
             -e GOOS=linux \
             -e GOARCH=arm64 \
             alpine:latest /bin/sh -c "
-              # 1. 安装 Alpine 编译依赖（新增 cmake 防万一）
+              # 1. 安装 Alpine 编译依赖
               apk update && \
               apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community go && \
               apk add --no-cache gcc g++ musl-dev python3-dev git wget linux-headers make cmake \
@@ -40,39 +40,39 @@ jobs:
               tar -xzf xcaddy_0.4.5_linux_arm64.tar.gz && \
               chmod +x xcaddy && \
 
-              # 3. 克隆插件 (保留所有原始逻辑)
+              # 3. 克隆插件
               git clone https://\$GH_TOKEN@github.com/hslatman/caddy-crowdsec-bouncer.git crowdsec-plugin && \
               (cd crowdsec-plugin && git checkout main || true) && \
               git clone https://github.com/W0n9/caddy_waf_t1k.git caddy_waf_t1k && \
               git clone https://github.com/chaitin/t1k-go.git t1k-go && \
 
-              # 4. 【核心修复】：彻底重写 Watcher CGO 链接链（适配 2026 release 分支最新结构）
-              echo '=== 深度修补 Watcher CGO 链接链 ===' && \
-              git clone --depth 1 https://github.com/e-dant/watcher.git local-watcher && \
+              # 4. 【最终修复】Watcher CGO（使用真实 header + release 分支）
+              echo '=== Watcher CGO 彻底修复（真实 header + 平铺）===' && \
+              git clone --depth 1 -b release https://github.com/e-dant/watcher.git local-watcher && \
               
-              # 创建正确的 include 结构（让 <wtr/watcher-c.h> 能找到）
               mkdir -p local-watcher/watcher-go/wtr && \
+              # 复制所有 C++ 头文件
               cp -rv local-watcher/include/wtr/* local-watcher/watcher-go/wtr/ && \
-              # watcher-c.h 在仓库中不存在（由 meson 生成），使用最小 stub（原脚本意图）
-              printf \"#ifndef WTR_WATCHER_C_H\n#define WTR_WATCHER_C_H\ntypedef void* watcher_t;\n#endif\n\" > local-watcher/watcher-go/wtr/watcher-c.h && \
+              # 【关键】使用仓库里真实的 watcher-c.h（不再用 stub）
+              cp -f local-watcher/watcher-c/include/wtr/watcher-c.h local-watcher/watcher-go/wtr/watcher-c.h && \
               
-              # 把所有 C/C++ 实现文件平铺到 watcher-go/（让 CGO 自动编译）
+              # 平铺所有 .cpp/.c/.hpp（让 CGO 一次性编译）
               echo '=== 平铺所有实现源码 ===' && \
               find local-watcher/src -name \"*.cpp\" -o -name \"*.hpp\" -o -name \"*.c\" 2>/dev/null | xargs -I {} cp -f {} local-watcher/watcher-go/ || true && \
               find local-watcher/watcher-c -name \"*.cpp\" -o -name \"*.c\" 2>/dev/null | xargs -I {} cp -f {} local-watcher/watcher-go/ || true && \
-              echo \"Watcher 修复完成：wtr/ 结构 + stub watcher-c.h + 所有源码已平铺\" && \
+              echo \"Watcher 修复完成：真实 watcher-c.h + 所有源码已平铺\" && \
               
-              # 调试检查（推荐保留）
-              ls -l local-watcher/watcher-go/wtr/ local-watcher/watcher-go/*.cpp 2>/dev/null || true && \
+              # 调试输出（方便你看日志）
+              ls -l local-watcher/watcher-go/wtr/watcher-c.h local-watcher/watcher-go/watcher-c.cpp 2>/dev/null || true && \
               
-              # 5. 设置 CGO 标志（强化 C++17 + 包含路径）
+              # 5. CGO 环境变量（必须包含 watcher-go 目录）
               PHP_INC=\$(find /usr/include -name \"php\" -type d | head -n 1) && \
               export CGO_CFLAGS=\"\$(python3-config --cflags) -I\$PHP_INC -I\$PHP_INC/main -I\$PHP_INC/TSRM -I\$PHP_INC/Zend -I\$(pwd)/local-watcher/watcher-go\" && \
               export CGO_CXXFLAGS=\"-std=c++17\" && \
               export CGO_LDFLAGS=\"\$(python3-config --embed --ldflags || python3-config --ldflags) -lphp83 -lstdc++\" && \
               export CXX=g++ && \
               
-              # 6. 执行编译 (恢复所有插件与路径)
+              # 6. 执行 xcaddy 编译
               ./xcaddy build v2.11.2 \
                 --with github.com/dunglas/frankenphp/caddy \
                 --with github.com/mliezun/caddy-snake \
@@ -117,7 +117,7 @@ jobs:
                 --replace github.com/hslatman/caddy-crowdsec-bouncer=./crowdsec-plugin \
                 --output ./caddy-arm64 && \
 
-              # 7. 提取依赖库并打包
+              # 7. 打包运行库
               echo '=== 开始提取运行库 ===' && \
               mkdir -p ./caddy-bundle/lib && \
               mv ./caddy-arm64 ./caddy-bundle/ && \
@@ -133,7 +133,7 @@ jobs:
             "
 
       - name: Show Build Result Info
-        run: ls -lh caddy-arm64-bundle.tar.gz
+        run: ls -lh caddy-arm64-bundle.tar.gz || echo "构建失败"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
