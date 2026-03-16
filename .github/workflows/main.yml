@@ -7,6 +7,7 @@ on:
 
 jobs:
   build-caddy:
+    # 保持使用原生 ARM64，避免 QEMU 导致的 OOM 崩溃
     runs-on: ubuntu-24.04-arm
     strategy:
       matrix:
@@ -27,14 +28,14 @@ jobs:
             -e GOOS=linux \
             -e GOARCH=arm64 \
             alpine:latest /bin/sh -c "
-              # 1. 安装依赖（关键：acl-dev 解决 -lacl）
+              # 1. 安装依赖（新增 php83-session 解决 ps_globals 丢失问题）
               apk update && \
               apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community go && \
               apk add --no-cache gcc g++ musl-dev python3-dev git wget linux-headers make \
               libxml2-dev openssl-dev bzip2-dev curl-dev libpng-dev libjpeg-turbo-dev \
               freetype-dev icu-dev libzip-dev oniguruma-dev libucontext-dev \
               brotli-dev argon2-dev libedit-dev \
-              php83-dev php83-embed acl-dev && \
+              php83-dev php83-embed php83-session acl-dev && \
               
               # 【修复 1】：动态获取 Alpine 实际安装的 libphpXX.so 并建立 libphp.so 软链接
               echo '=== 修复 -lphp 链接问题 ===' && \
@@ -66,16 +67,16 @@ jobs:
               find local-watcher/src -name \"*.cpp\" -o -name \"*.hpp\" -o -name \"*.c\" 2>/dev/null | grep -Ev '(test|main)' | xargs -I {} cp -f {} local-watcher/watcher-go/ || true && \
               find local-watcher/watcher-c -name \"*.cpp\" -o -name \"*.c\" 2>/dev/null | grep -Ev '(test|main)' | xargs -I {} cp -f {} local-watcher/watcher-go/ || true && \
               
-              # 【修复 2】：抹除 Go 源码中硬编码的动态库链接，因为我们已经在本地平铺编译了
+              # 【修复 2】：抹除 Go 源码中硬编码的动态库链接
               echo '=== 抹除硬编码的 -lwatcher-c ===' && \
               find local-watcher/watcher-go -name \"*.go\" -exec sed -i 's/-lwatcher-c//g' {} + && \
               
               ls -l local-watcher/watcher-go/wtr/watcher-c.h local-watcher/watcher-go/*.cpp 2>/dev/null | head -10 && \
               
-              # 5. CGO 变量（使用 php83 + acl-dev + 正确 lib）
+              # 5. CGO 变量（关键修复：强制链接 session.so 并指定 rpath 以便于后续提取）
               export CGO_CFLAGS=\"\$(php-config83 --includes) \$(python3-config --cflags) -I\$(pwd)/local-watcher/watcher-go\" && \
               export CGO_CXXFLAGS=\"-std=c++17\" && \
-              export CGO_LDFLAGS=\"\$(php-config83 --ldflags) \$(php-config83 --libs) \$(python3-config --embed --ldflags || python3-config --ldflags) -lphp83 -lacl -lstdc++\" && \
+              export CGO_LDFLAGS=\"\$(php-config83 --ldflags) \$(php-config83 --libs) \$(python3-config --embed --ldflags || python3-config --ldflags) -L/usr/lib/php83/modules -l:session.so -Wl,-rpath=/usr/lib/php83/modules -lphp83 -lacl -lstdc++\" && \
               export CXX=g++ && \
               echo '=== CGO 调试 ===' && \
               echo 'CGO_CFLAGS: ' \$CGO_CFLAGS && \
