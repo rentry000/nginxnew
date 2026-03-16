@@ -27,14 +27,14 @@ jobs:
             -e GOOS=linux \
             -e GOARCH=arm64 \
             alpine:latest /bin/sh -c "
-              # 1. 安装依赖（PHP 用 php83-dev + embed）
+              # 1. 安装所有依赖（新增 acl-dev 解决 -lacl）
               apk update && \
               apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community go && \
               apk add --no-cache gcc g++ musl-dev python3-dev git wget linux-headers make cmake \
               libxml2-dev openssl-dev bzip2-dev curl-dev libpng-dev libjpeg-turbo-dev \
               freetype-dev icu-dev libzip-dev oniguruma-dev libucontext-dev \
               brotli-dev argon2-dev libedit-dev \
-              php83-dev php83-embed && \
+              php83-dev php83-embed acl-dev && \
               
               # 2. 安装 xcaddy
               wget https://github.com/caddyserver/xcaddy/releases/download/v0.4.5/xcaddy_0.4.5_linux_arm64.tar.gz && \
@@ -47,21 +47,29 @@ jobs:
               git clone https://github.com/W0n9/caddy_waf_t1k.git caddy_waf_t1k && \
               git clone https://github.com/chaitin/t1k-go.git t1k-go && \
 
-              # 4. Watcher CGO（已稳定）
-              echo '=== Watcher CGO 修复完成 ===' && \
+              # 4. 【最终正确方式】Watcher CGO - 编译 static lib（不再平铺源码，彻底解决 multiple main）
+              echo '=== Building watcher-c static library ===' && \
               git clone --depth 1 -b release https://github.com/e-dant/watcher.git local-watcher && \
+              cd local-watcher/watcher-c && \
+              mkdir -p build && cd build && \
+              cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF && \
+              make -j2 && \
+              # 把生成的 lib 放到 watcher-go 目录（让 CGO 能找到）
+              cp -f libwatcher-c.a ../../watcher-go/ 2>/dev/null || cp -f ../libwatcher-c.a ../../watcher-go/ && \
+              cd ../../../ && \
+              
+              # 只复制 header（解决 <wtr/watcher-c.h>）
               mkdir -p local-watcher/watcher-go/wtr && \
               cp -rv local-watcher/include/wtr/* local-watcher/watcher-go/wtr/ && \
               cp -f local-watcher/watcher-c/include/wtr/watcher-c.h local-watcher/watcher-go/wtr/watcher-c.h && \
-              find local-watcher/src -name \"*.cpp\" -o -name \"*.hpp\" -o -name \"*.c\" 2>/dev/null | xargs -I {} cp -f {} local-watcher/watcher-go/ || true && \
-              find local-watcher/watcher-c -name \"*.cpp\" -o -name \"*.c\" 2>/dev/null | xargs -I {} cp -f {} local-watcher/watcher-go/ || true && \
+              echo 'Watcher 编译完成：static lib + headers 已就位' && \
               
-              # 5. 【关键修复】CGO 环境变量使用 Alpine 正确的 php-config83
-              export CGO_CFLAGS=\"\$(php-config83 --includes) \$(python3-config --cflags) -I\$(pwd)/local-watcher/watcher-go\" && \
+              # 5. CGO 环境变量（精确路径 + 正确 lib）
+              export CGO_CFLAGS=\"\$(php-config83 --includes) \$(python3-config --cflags) -I\$(pwd)/local-watcher/watcher-go -I\$(pwd)/local-watcher/watcher-c/include -I\$(pwd)/local-watcher/include\" && \
               export CGO_CXXFLAGS=\"-std=c++17\" && \
-              export CGO_LDFLAGS=\"\$(php-config83 --ldflags) \$(php-config83 --libs) \$(python3-config --embed --ldflags || python3-config --ldflags) -lstdc++\" && \
+              export CGO_LDFLAGS=\"\$(php-config83 --ldflags) \$(php-config83 --libs) \$(python3-config --embed --ldflags || python3-config --ldflags) -L\$(pwd)/local-watcher/watcher-go -lwatcher-c -lstdc++\" && \
               export CXX=g++ && \
-              echo '=== CGO 变量调试 ===' && \
+              echo '=== CGO 调试信息 ===' && \
               echo 'CGO_CFLAGS: ' \$CGO_CFLAGS && \
               echo 'CGO_LDFLAGS: ' \$CGO_LDFLAGS && \
               
