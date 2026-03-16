@@ -27,10 +27,10 @@ jobs:
             -e GOOS=linux \
             -e GOARCH=arm64 \
             alpine:latest /bin/sh -c "
-              # 1. 安装 Alpine 编译依赖
+              # 1. 安装 Alpine 编译依赖（新增 cmake 防万一）
               apk update && \
               apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community go && \
-              apk add --no-cache gcc g++ musl-dev python3-dev git wget linux-headers make \
+              apk add --no-cache gcc g++ musl-dev python3-dev git wget linux-headers make cmake \
               libxml2-dev openssl-dev bzip2-dev curl-dev libpng-dev libjpeg-turbo-dev \
               freetype-dev icu-dev libzip-dev oniguruma-dev libucontext-dev \
               brotli-dev argon2-dev libedit-dev && \
@@ -46,19 +46,28 @@ jobs:
               git clone https://github.com/W0n9/caddy_waf_t1k.git caddy_waf_t1k && \
               git clone https://github.com/chaitin/t1k-go.git t1k-go && \
 
-              # 4. 【核心修复】：彻底重写 Watcher CGO 链接链
-              echo '=== 深度修补 Watcher 源码与平铺实现文件 ===' && \
+              # 4. 【核心修复】：彻底重写 Watcher CGO 链接链（适配 2026 release 分支最新结构）
+              echo '=== 深度修补 Watcher CGO 链接链 ===' && \
               git clone --depth 1 https://github.com/e-dant/watcher.git local-watcher && \
-              # 将 wtr 目录下的所有实现文件 (.cpp/.hpp) 平铺到 watcher-go 目录下
-              # 这是为了让 CGO 在处理 watcher.go 时能直接找到同级的源码进行编译
-              cp -rv local-watcher/include/wtr/* local-watcher/watcher-go/ && \
-              # 确保 watcher-c.h 存在且定义正确
-              printf \"#ifndef WTR_WATCHER_C_H\n#define WTR_WATCHER_C_H\ntypedef void* watcher_t;\n#endif\n\" > local-watcher/watcher-go/watcher-c.h && \
               
-              # 5. 设置 CGO 标志 (强化 C++17 支持和动态库链接)
+              # 创建正确的 include 结构（让 <wtr/watcher-c.h> 能找到）
+              mkdir -p local-watcher/watcher-go/wtr && \
+              cp -rv local-watcher/include/wtr/* local-watcher/watcher-go/wtr/ && \
+              # watcher-c.h 在仓库中不存在（由 meson 生成），使用最小 stub（原脚本意图）
+              printf \"#ifndef WTR_WATCHER_C_H\n#define WTR_WATCHER_C_H\ntypedef void* watcher_t;\n#endif\n\" > local-watcher/watcher-go/wtr/watcher-c.h && \
+              
+              # 把所有 C/C++ 实现文件平铺到 watcher-go/（让 CGO 自动编译）
+              echo '=== 平铺所有实现源码 ===' && \
+              find local-watcher/src -name \"*.cpp\" -o -name \"*.hpp\" -o -name \"*.c\" 2>/dev/null | xargs -I {} cp -f {} local-watcher/watcher-go/ || true && \
+              find local-watcher/watcher-c -name \"*.cpp\" -o -name \"*.c\" 2>/dev/null | xargs -I {} cp -f {} local-watcher/watcher-go/ || true && \
+              echo \"Watcher 修复完成：wtr/ 结构 + stub watcher-c.h + 所有源码已平铺\" && \
+              
+              # 调试检查（推荐保留）
+              ls -l local-watcher/watcher-go/wtr/ local-watcher/watcher-go/*.cpp 2>/dev/null || true && \
+              
+              # 5. 设置 CGO 标志（强化 C++17 + 包含路径）
               PHP_INC=\$(find /usr/include -name \"php\" -type d | head -n 1) && \
-              export CGO_CFLAGS=\"\$(python3-config --cflags) -I\$PHP_INC -I\$PHP_INC/main -I\$PHP_INC/TSRM -I\$PHP_INC/Zend\" && \
-              # 显式告知 CGO 使用 C++17 标准处理 watcher 的源码
+              export CGO_CFLAGS=\"\$(python3-config --cflags) -I\$PHP_INC -I\$PHP_INC/main -I\$PHP_INC/TSRM -I\$PHP_INC/Zend -I\$(pwd)/local-watcher/watcher-go\" && \
               export CGO_CXXFLAGS=\"-std=c++17\" && \
               export CGO_LDFLAGS=\"\$(python3-config --embed --ldflags || python3-config --ldflags) -lphp83 -lstdc++\" && \
               export CXX=g++ && \
