@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go_version: ["1.25"]
+        go_version: ["1.26"]
 
     steps:
       - name: Checkout code
