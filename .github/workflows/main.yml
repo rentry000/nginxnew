@@ -10,7 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go_version: ["1.25"]
+        # 核心修复：提升 Go 版本以满足 FrankenPHP v1.12.1 的要求 (>= 1.26.0)
+        go_version: ["1.26"]
 
     steps:
       - name: Checkout code
@@ -32,9 +33,11 @@ jobs:
             -e GOOS=linux \
             -e GOARCH=arm64 \
             alpine:latest /bin/sh -c "
-              # 1. 安装 Alpine 编译依赖 (包含 Python, PHP 8.x 开发库及 FrankenPHP 依赖)
+              # 1. 安装 Alpine 编译依赖
+              # 注意：为了配合 Go 1.26，我们使用 edge 仓库或确保安装最新的 go 包
               apk update && \
-              apk add --no-cache go gcc g++ musl-dev python3-dev git wget linux-headers make \
+              apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community go && \
+              apk add --no-cache gcc g++ musl-dev python3-dev git wget linux-headers make \
               libxml2-dev openssl-dev bzip2-dev curl-dev libpng-dev libjpeg-turbo-dev \
               freetype-dev icu-dev libzip-dev oniguruma-dev libucontext-dev \
               brotli-dev argon2-dev libedit-dev && \
@@ -59,14 +62,12 @@ jobs:
               printf \"#ifndef WTR_WATCHER_C_H\n#define WTR_WATCHER_C_H\ntypedef void* watcher_t;\n#endif\n\" > watcher-go/wtr/watcher-c.h && \
               cd .. && \
 
-              # 5. 动态获取 PHP 和 Python 的编译标志 (合并 CGO 参数)
-              # 自动定位 Alpine 中的 PHP 头文件路径
+              # 5. 动态获取 PHP 和 Python 的编译标志
               PHP_INC=\$(find /usr/include -name \"php\" -type d | head -n 1) && \
               export CGO_CFLAGS=\"\$(python3-config --cflags) -I\$PHP_INC -I\$PHP_INC/main -I\$PHP_INC/TSRM -I\$PHP_INC/Zend\" && \
               export CGO_LDFLAGS=\"\$(python3-config --embed --ldflags || python3-config --ldflags) -lphp83\" && \
               
-              # 6. 执行编译 (包含 FrankenPHP + Python + 修复后的 Watcher)
-              # 注意：已移除 caddy-waf 以避免与 coraza 冲突
+              # 6. 执行编译 (满足 Go 1.26 条件)
               ./xcaddy build v2.11.2 \
                 --with github.com/dunglas/frankenphp/caddy \
                 --with github.com/mliezun/caddy-snake \
@@ -115,14 +116,9 @@ jobs:
               echo '=== 开始提取动态链接库 ===' && \
               mkdir -p ./caddy-bundle/lib && \
               mv ./caddy-arm64 ./caddy-bundle/ && \
-              
-              # 提取二进制文件依赖的所有 .so
               ( ldd ./caddy-bundle/caddy-arm64 | grep '=> /' | awk '{print \$3}' | xargs -I '{}' cp '{}' ./caddy-bundle/lib/ || true ) && \
-              
-              # 确保 musl 动态链接器也被包含
               ( cp /lib/ld-musl-aarch64.so.1 ./caddy-bundle/lib/ || true ) && \
               
-              # 编写 run.sh 启动脚本
               echo '#!/bin/sh' > ./caddy-bundle/run.sh && \
               echo 'DIR=\"\$(cd \"\$(dirname \"\$0\")\" && pwd)\"' >> ./caddy-bundle/run.sh && \
               echo 'export LD_LIBRARY_PATH=\"\$DIR/lib:\$LD_LIBRARY_PATH\"' >> ./caddy-bundle/run.sh && \
@@ -150,5 +146,4 @@ jobs:
           name: Custom Caddy ARM64 (FrankenPHP + Python) v2.11.2
           body: |
             集成 FrankenPHP + Python (caddy-snake) + Coraza WAF + CrowdSec。
-            解决 watcher-go 编译依赖问题。
-            支持 Android / Linux ARM64 (Musl) 环境。
+            使用 Go 1.26 编译以适配最新 FrankenPHP 插件要求。
