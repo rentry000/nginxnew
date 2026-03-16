@@ -27,7 +27,7 @@ jobs:
             -e GOOS=linux \
             -e GOARCH=arm64 \
             alpine:latest /bin/sh -c "
-              # 1. 安装 Alpine 编译依赖（新增 PHP 8.3 dev + embed）
+              # 1. 安装依赖（PHP 用 php83-dev + embed）
               apk update && \
               apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community go && \
               apk add --no-cache gcc g++ musl-dev python3-dev git wget linux-headers make cmake \
@@ -47,7 +47,7 @@ jobs:
               git clone https://github.com/W0n9/caddy_waf_t1k.git caddy_waf_t1k && \
               git clone https://github.com/chaitin/t1k-go.git t1k-go && \
 
-              # 4. Watcher CGO（已验证通过）
+              # 4. Watcher CGO（已稳定）
               echo '=== Watcher CGO 修复完成 ===' && \
               git clone --depth 1 -b release https://github.com/e-dant/watcher.git local-watcher && \
               mkdir -p local-watcher/watcher-go/wtr && \
@@ -55,17 +55,17 @@ jobs:
               cp -f local-watcher/watcher-c/include/wtr/watcher-c.h local-watcher/watcher-go/wtr/watcher-c.h && \
               find local-watcher/src -name \"*.cpp\" -o -name \"*.hpp\" -o -name \"*.c\" 2>/dev/null | xargs -I {} cp -f {} local-watcher/watcher-go/ || true && \
               find local-watcher/watcher-c -name \"*.cpp\" -o -name \"*.c\" 2>/dev/null | xargs -I {} cp -f {} local-watcher/watcher-go/ || true && \
-              ls -l local-watcher/watcher-go/wtr/watcher-c.h 2>/dev/null || true && \
               
-              # 5. CGO 环境变量（官方推荐 php-config + Python）
-              export CGO_CFLAGS=\"\$(php-config --includes) \$(python3-config --cflags) -I\$(pwd)/local-watcher/watcher-go\" && \
+              # 5. 【关键修复】CGO 环境变量使用 Alpine 正确的 php-config83
+              export CGO_CFLAGS=\"\$(php-config83 --includes) \$(python3-config --cflags) -I\$(pwd)/local-watcher/watcher-go\" && \
               export CGO_CXXFLAGS=\"-std=c++17\" && \
-              export CGO_LDFLAGS=\"\$(php-config --ldflags) \$(php-config --libs) \$(python3-config --embed --ldflags || python3-config --ldflags) -lstdc++\" && \
+              export CGO_LDFLAGS=\"\$(php-config83 --ldflags) \$(php-config83 --libs) \$(python3-config --embed --ldflags || python3-config --ldflags) -lstdc++\" && \
               export CXX=g++ && \
-              echo 'CGO_CFLAGS: '\$CGO_CFLAGS && \
-              echo 'CGO_LDFLAGS: '\$CGO_LDFLAGS && \
+              echo '=== CGO 变量调试 ===' && \
+              echo 'CGO_CFLAGS: ' \$CGO_CFLAGS && \
+              echo 'CGO_LDFLAGS: ' \$CGO_LDFLAGS && \
               
-              # 6. 执行 xcaddy 编译
+              # 6. 执行编译
               ./xcaddy build v2.11.2 \
                 --with github.com/dunglas/frankenphp/caddy \
                 --with github.com/mliezun/caddy-snake \
@@ -110,7 +110,7 @@ jobs:
                 --replace github.com/hslatman/caddy-crowdsec-bouncer=./crowdsec-plugin \
                 --output ./caddy-arm64 && \
 
-              # 7. 打包运行库
+              # 7. 打包
               echo '=== 开始提取运行库 ===' && \
               mkdir -p ./caddy-bundle/lib && \
               mv ./caddy-arm64 ./caddy-bundle/ && \
