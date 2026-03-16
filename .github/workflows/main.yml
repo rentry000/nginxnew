@@ -7,7 +7,6 @@ on:
 
 jobs:
   build-caddy:
-    # 保持使用原生 ARM64，避免 QEMU 导致的 OOM 崩溃
     runs-on: ubuntu-24.04-arm
     strategy:
       matrix:
@@ -28,7 +27,7 @@ jobs:
             -e GOOS=linux \
             -e GOARCH=arm64 \
             alpine:latest /bin/sh -c "
-              # 1. 安装 Alpine 编译依赖 (包含 Go 1.26)
+              # 1. 安装 Alpine 编译依赖
               apk update && \
               apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community go && \
               apk add --no-cache gcc g++ musl-dev python3-dev git wget linux-headers make \
@@ -36,34 +35,35 @@ jobs:
               freetype-dev icu-dev libzip-dev oniguruma-dev libucontext-dev \
               brotli-dev argon2-dev libedit-dev && \
               
-              # 2. 安装 xcaddy (ARM64)
+              # 2. 安装 xcaddy
               wget https://github.com/caddyserver/xcaddy/releases/download/v0.4.5/xcaddy_0.4.5_linux_arm64.tar.gz && \
               tar -xzf xcaddy_0.4.5_linux_arm64.tar.gz && \
               chmod +x xcaddy && \
 
-              # 3. 克隆插件
+              # 3. 克隆插件 (保留所有原始逻辑)
               git clone https://\$GH_TOKEN@github.com/hslatman/caddy-crowdsec-bouncer.git crowdsec-plugin && \
               (cd crowdsec-plugin && git checkout main || true) && \
               git clone https://github.com/W0n9/caddy_waf_t1k.git caddy_waf_t1k && \
               git clone https://github.com/chaitin/t1k-go.git t1k-go && \
 
-              # 4. 【核心修复】：深度修补 Watcher 源码
-              echo '=== 深度修补 Watcher 源码 ===' && \
+              # 4. 【核心修复】：彻底重写 Watcher CGO 链接链
+              echo '=== 深度修补 Watcher 源码与平铺实现文件 ===' && \
               git clone --depth 1 https://github.com/e-dant/watcher.git local-watcher && \
-              cd local-watcher && \
-              mkdir -p watcher-go/wtr && \
-              cp -r include/wtr/* watcher-go/wtr/ && \
-              find include -name '*.cpp' -exec cp {} watcher-go/wtr/ \; || true && \
-              printf \"#ifndef WTR_WATCHER_C_H\n#define WTR_WATCHER_C_H\ntypedef void* watcher_t;\n#endif\n\" > watcher-go/wtr/watcher-c.h && \
-              cd .. && \
-
-              # 5. 设置 CGO 标志 (增加针对 C++ 的支持)
+              # 将 wtr 目录下的所有实现文件 (.cpp/.hpp) 平铺到 watcher-go 目录下
+              # 这是为了让 CGO 在处理 watcher.go 时能直接找到同级的源码进行编译
+              cp -rv local-watcher/include/wtr/* local-watcher/watcher-go/ && \
+              # 确保 watcher-c.h 存在且定义正确
+              printf \"#ifndef WTR_WATCHER_C_H\n#define WTR_WATCHER_C_H\ntypedef void* watcher_t;\n#endif\n\" > local-watcher/watcher-go/watcher-c.h && \
+              
+              # 5. 设置 CGO 标志 (强化 C++17 支持和动态库链接)
               PHP_INC=\$(find /usr/include -name \"php\" -type d | head -n 1) && \
               export CGO_CFLAGS=\"\$(python3-config --cflags) -I\$PHP_INC -I\$PHP_INC/main -I\$PHP_INC/TSRM -I\$PHP_INC/Zend\" && \
+              # 显式告知 CGO 使用 C++17 标准处理 watcher 的源码
+              export CGO_CXXFLAGS=\"-std=c++17\" && \
               export CGO_LDFLAGS=\"\$(python3-config --embed --ldflags || python3-config --ldflags) -lphp83 -lstdc++\" && \
               export CXX=g++ && \
               
-              # 6. 执行编译 (恢复 pkg.jsn.cam 正确路径)
+              # 6. 执行编译 (恢复所有插件与路径)
               ./xcaddy build v2.11.2 \
                 --with github.com/dunglas/frankenphp/caddy \
                 --with github.com/mliezun/caddy-snake \
