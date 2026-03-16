@@ -99,6 +99,7 @@ jobs:
                 --with github.com/porech/caddy-maxmind-geolocation \
                 --with github.com/hslatman/caddy-crowdsec-bouncer/http \
                 --with pkg.jsn.cam/caddy-defender@v0.10.0 \
+                --with github.com/fabriziosalmi/caddy-waf \
                 --replace github.com/W0n9/caddy_waf_t1k=./caddy_waf_t1k \
                 --replace github.com/chaitin/t1k-go=./t1k-go \
                 --replace github.com/hslatman/caddy-crowdsec-bouncer=./crowdsec-plugin \
