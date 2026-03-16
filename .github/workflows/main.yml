@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-caddy:
-    # 直接使用原生 ARM64 CPU 的 Runner，免去 QEMU 模拟带来的性能损耗和 OOM 问题
+    # 保持使用原生 ARM64，避免 QEMU 导致的 OOM 崩溃
     runs-on: ubuntu-24.04-arm
     strategy:
       matrix:
@@ -16,8 +16,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      # 已经在使用原生 ARM64 CPU，不再需要 Set up QEMU 步骤
 
       - name: Build in Alpine ARM64 (Musl libc) and Extract Dependencies
         run: |
@@ -49,7 +47,7 @@ jobs:
               git clone https://github.com/W0n9/caddy_waf_t1k.git caddy_waf_t1k && \
               git clone https://github.com/chaitin/t1k-go.git t1k-go && \
 
-              # 4. 【核心修复】：彻底重塑 Watcher 编译环境
+              # 4. 【核心修复】：深度修补 Watcher 源码
               echo '=== 深度修补 Watcher 源码 ===' && \
               git clone --depth 1 https://github.com/e-dant/watcher.git local-watcher && \
               cd local-watcher && \
@@ -65,7 +63,7 @@ jobs:
               export CGO_LDFLAGS=\"\$(python3-config --embed --ldflags || python3-config --ldflags) -lphp83 -lstdc++\" && \
               export CXX=g++ && \
               
-              # 6. 执行编译 (使用原生 Github 路径替换 pkg.jsn.cam)
+              # 6. 执行编译 (恢复 pkg.jsn.cam 正确路径)
               ./xcaddy build v2.11.2 \
                 --with github.com/dunglas/frankenphp/caddy \
                 --with github.com/mliezun/caddy-snake \
@@ -103,7 +101,7 @@ jobs:
                 --with github.com/libdns/cloudflare \
                 --with github.com/porech/caddy-maxmind-geolocation \
                 --with github.com/hslatman/caddy-crowdsec-bouncer/http \
-                --with github.com/jsnjack/caddy-defender@v0.10.0 \
+                --with pkg.jsn.cam/caddy-defender@v0.10.0 \
                 --replace github.com/e-dant/watcher=./local-watcher \
                 --replace github.com/W0n9/caddy_waf_t1k=./caddy_waf_t1k \
                 --replace github.com/chaitin/t1k-go=./t1k-go \
