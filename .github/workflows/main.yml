@@ -1,4 +1,4 @@
-name: Build Custom Caddy ARM64 (Latest v2.11.1)
+name: Build Custom Caddy ARM64 (With FrankenPHP)
 
 on:
   push:
@@ -32,37 +32,44 @@ jobs:
             -e GOOS=linux \
             -e GOARCH=arm64 \
             alpine:latest /bin/sh -c "
-              # 1. 安装 Alpine 轻量级编译依赖
+              # 1. 安装 Alpine 编译依赖 (包含 FrankenPHP 所需的 libbrotli, openssl, php-dev)
               apk update && \
-              apk add --no-cache go gcc g++ musl-dev python3-dev git wget linux-headers make && \
+              apk add --no-cache go gcc g++ musl-dev python3-dev git wget linux-headers make \
+              libxml2-dev openssl-dev bzip2-dev curl-dev libpng-dev libjpeg-turbo-dev \
+              freetype-dev icu-dev libzip-dev oniguruma-dev libucontext-dev \
+              brotli-dev argon2-dev libedit-dev && \
               
               # 2. 安装 xcaddy (ARM64)
               wget https://github.com/caddyserver/xcaddy/releases/download/v0.4.5/xcaddy_0.4.5_linux_arm64.tar.gz && \
               tar -xzf xcaddy_0.4.5_linux_arm64.tar.gz && \
               chmod +x xcaddy && \
 
-              # 3. 克隆所有插件
+              # 3. 克隆插件及 Patch 准备
               git clone https://\$GH_TOKEN@github.com/hslatman/caddy-crowdsec-bouncer.git crowdsec-plugin && \
               (cd crowdsec-plugin && git checkout main || true) && \
               git clone https://github.com/W0n9/caddy_waf_t1k.git caddy_waf_t1k && \
               git clone https://github.com/chaitin/t1k-go.git t1k-go && \
 
-              # 4. Patch Watcher-go 源码
-              go mod init dummy || true && \
-              go get github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be || true && \
+              # 4. 关键：解决 FrankenPHP 依赖的 Watcher-go 源码问题
+              # 提前下载并修补 watcher，防止编译阶段找不到头文件
+              go mod init build_fix || true && \
+              ( go get github.com/e-dant/watcher@v0.0.0-20260223030516-06f84a1314be || true ) && \
               WATCHER_PATH=\$(go list -m -f {{.Dir}} github.com/e-dant/watcher) && \
               if [ -n \"\$WATCHER_PATH\" ]; then
+                echo 'Patching watcher-go headers...' && \
                 mkdir -p \"\$WATCHER_PATH/watcher-go/wtr\" && \
                 cp -r \"\$WATCHER_PATH/include/wtr/\"* \"\$WATCHER_PATH/watcher-go/wtr/\" 2>/dev/null || true && \
                 printf \"#ifndef WTR_WATCHER_C_H\n#define WTR_WATCHER_C_H\ntypedef void* watcher_t;\n#endif\n\" > \"\$WATCHER_PATH/watcher-go/wtr/watcher-c.h\"
               fi && \
 
-              # 5. 动态获取 Python 头文件和链接库标志
-              export CGO_CFLAGS=\$(python3-config --cflags) && \
-              export CGO_LDFLAGS=\$(python3-config --embed --ldflags || python3-config --ldflags) && \
+              # 5. 设置 CGO 标志 (Python + PHP/FrankenPHP 环境)
+              export CGO_CFLAGS=\"\$(python3-config --cflags) -I/usr/include/php83 -I/usr/include/php83/main -I/usr/include/php83/TSRM\" && \
+              export CGO_LDFLAGS=\"\$(python3-config --embed --ldflags || python3-config --ldflags) -lphp83\" && \
               
-              # 6. 执行编译
+              # 6. 执行编译 (新增 FrankenPHP 插件，同时保持其他插件不变)
+              # 注意：删除了 caddy-waf 以解决与 coraza 的注册冲突
               ./xcaddy build v2.11.2 \
+                --with github.com/dunglas/frankenphp/caddy \
                 --with github.com/mliezun/caddy-snake \
                 --with github.com/mholt/caddy-webdav \
                 --with github.com/caddy-dns/route53@v1.6.0 \
@@ -99,63 +106,44 @@ jobs:
                 --with github.com/porech/caddy-maxmind-geolocation \
                 --with github.com/hslatman/caddy-crowdsec-bouncer/http \
                 --with pkg.jsn.cam/caddy-defender@v0.10.0 \
-                --with github.com/fabriziosalmi/caddy-waf \
                 --replace github.com/W0n9/caddy_waf_t1k=./caddy_waf_t1k \
                 --replace github.com/chaitin/t1k-go=./t1k-go \
                 --replace github.com/hslatman/caddy-crowdsec-bouncer=./crowdsec-plugin \
                 --output ./caddy-arm64 && \
 
-              # ==========================================
-              # 7. 开始提取依赖库并打包 (新增核心逻辑)
-              # ==========================================
+              # 7. 提取依赖库并打包
               echo '=== 开始提取动态链接库 ===' && \
               mkdir -p ./caddy-bundle/lib && \
               mv ./caddy-arm64 ./caddy-bundle/ && \
               
-              # 使用 ldd 找出所有依赖的 .so 文件并复制到 lib 目录
-              ldd ./caddy-bundle/caddy-arm64 | grep '=> /' | awk '{print \$3}' | xargs -I '{}' cp '{}' ./caddy-bundle/lib/ || true && \
+              ( ldd ./caddy-bundle/caddy-arm64 | grep '=> /' | awk '{print \$3}' | xargs -I '{}' cp '{}' ./caddy-bundle/lib/ || true ) && \
+              ( cp /lib/ld-musl-aarch64.so.1 ./caddy-bundle/lib/ || true ) && \
               
-              # 单独拷贝 musl 动态链接器（通常在 ldd 格式中不带 '=>'）
-              cp /lib/ld-musl-aarch64.so.1 ./caddy-bundle/lib/ || true && \
-              
-              # 创建万能启动脚本 run.sh
               echo '#!/bin/sh' > ./caddy-bundle/run.sh && \
               echo 'DIR=\"\$(cd \"\$(dirname \"\$0\")\" && pwd)\"' >> ./caddy-bundle/run.sh && \
               echo 'export LD_LIBRARY_PATH=\"\$DIR/lib:\$LD_LIBRARY_PATH\"' >> ./caddy-bundle/run.sh && \
               echo 'exec \"\$DIR/lib/ld-musl-aarch64.so.1\" -- \"\$DIR/caddy-arm64\" \"\$@\"' >> ./caddy-bundle/run.sh && \
               
-              # 赋予执行权限并压缩打包
               chmod +x ./caddy-bundle/run.sh ./caddy-bundle/caddy-arm64 ./caddy-bundle/lib/ld-musl-aarch64.so.1 && \
               tar -czvf caddy-arm64-bundle.tar.gz ./caddy-bundle
             "
 
       - name: Show Build Result Info
-        run: |
-          ls -lh caddy-arm64-bundle.tar.gz
+        run: ls -lh caddy-arm64-bundle.tar.gz
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: caddy-arm64-bundle
           path: caddy-arm64-bundle.tar.gz
-          retention-days: 14
 
-      - name: Publish to GitHub Releases (on main branch)
+      - name: Publish to GitHub Releases
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           files: caddy-arm64-bundle.tar.gz
-          tag_name: caddy-arm64-bundle-v2.11.1
-          name: Custom Caddy ARM64 Bundle v2.11.1
-          draft: false
-          prerelease: false
+          tag_name: caddy-arm64-frankenphp-v2.11.2
+          name: Custom Caddy ARM64 (FrankenPHP) v2.11.2
           body: |
-            Custom cross-compiled Caddy v2.11.2 for linux/arm64 (Alpine musl).
-            **包含完整的 Python 和 Musl libc 运行库依赖**，专为 Android (Magisk/Termux) 等缺少原生依赖的环境设计。
-            
-            ### 食用方法：
-            1. 下载解压 `caddy-arm64-bundle.tar.gz`
-            2. 进入 `caddy-bundle` 目录
-            3. 使用 `./run.sh` 代替原本的 `caddy` 命令执行，例如：
-               `./run.sh version`
-               `./run.sh run --config /path/to/Caddyfile`
+            内置 FrankenPHP + Coraza WAF + Python + CrowdSec。
+            基于 Alpine Musl 编译，包含完整运行库。
